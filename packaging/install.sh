@@ -70,6 +70,14 @@ if [[ -f packaging/hwglance.svg ]]; then
     command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -q -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
     say "installed the app icon hwglance.svg to $ICONS"
 fi
+if compgen -G "packaging/icons/hicolor/*/apps/hwglance.png" >/dev/null; then
+    for png in packaging/icons/hicolor/*/apps/hwglance.png; do
+        size="$(basename "$(dirname "$(dirname "$png")")")"
+        install -Dm644 "$png" "$HOME/.local/share/icons/hicolor/$size/apps/hwglance.png"
+    done
+    command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -q -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+    say "installed the app icon as PNG (16 to 512 px) under ~/.local/share/icons/hicolor"
+fi
 
 # Bar widget (Omarchy only): copied, not symlinked, so `omarchy plugin update` (git checkouts only) skips it.
 if [[ $omarchy -eq 1 && -d omarchy-plugin/$PLUGIN_ID ]]; then

@@ -50,6 +50,10 @@ if [[ -f "$APPS/hwglance.desktop" ]]; then
     say "removed hwglance.desktop"
 fi
 
+if compgen -G "$HOME/.local/share/icons/hicolor/*x*/apps/hwglance.png" >/dev/null; then
+    rm -f "$HOME"/.local/share/icons/hicolor/*x*/apps/hwglance.png
+    say "removed the PNG app icons"
+fi
 if [[ -f "$ICONS/hwglance.svg" ]]; then
     rm -f "$ICONS/hwglance.svg" "$HOME/.local/share/icons/hicolor/symbolic/apps/hwglance-symbolic.svg"
     say "removed the app icon hwglance.svg"

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/logo.svg" alt="HW Glance logo: three horizontal result bars in blue, violet and cyan on a dark rounded square" width="96" height="96">
+</p>
+
 # HW Glance
 
 HW Glance is a hardware monitor for the Linux desktop. It puts every sensor your machine exposes (CPU, GPU, memory, drives, motherboard) and a Task Manager style process list in one window, laid out so a value can be found in about a second. A small background collector keeps min, max, average and a short history of every reading, and the window and an optional bar widget both read from it.
