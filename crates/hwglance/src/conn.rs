@@ -42,7 +42,8 @@ pub struct Shared {
     /// The collector keeps sending messages this window cannot read (another version, most
     /// likely); cleared by the next snapshot that can be.
     pub unreadable: bool,
-    demo_reset: bool,
+    /// Stats resets and undos sent, in order, for the demo generator to apply.
+    demo_stats: Vec<ClientMsg>,
     demo_history: Vec<(Vec<String>, u32)>,
     /// Limit changes sent (`SetThreshold`, `ResetThreshold`), for the demo generator to apply; a
     /// test reads them to see what the window asked for.
@@ -128,7 +129,12 @@ impl Link {
                 s.procs_off = !*enabled;
                 s.unfocused = *unfocused;
             }
-            ClientMsg::ResetStats => s.demo_reset = true,
+            ClientMsg::ResetStats | ClientMsg::UndoResetStats => {
+                if s.demo_stats.len() >= 16 {
+                    s.demo_stats.remove(0);
+                }
+                s.demo_stats.push(msg.clone());
+            }
             ClientMsg::History { ids, seconds } => s.demo_history.push((ids.clone(), *seconds)),
             ClientMsg::SetThreshold { .. } | ClientMsg::ResetThreshold { .. } => {
                 if s.demo_limits.len() >= 256 {
@@ -156,8 +162,8 @@ impl Link {
         self.lock().unfocused = unfocused;
     }
 
-    pub fn take_demo_reset(&self) -> bool {
-        std::mem::take(&mut self.lock().demo_reset)
+    pub fn take_demo_stats(&self) -> Vec<ClientMsg> {
+        std::mem::take(&mut self.lock().demo_stats)
     }
 }
 

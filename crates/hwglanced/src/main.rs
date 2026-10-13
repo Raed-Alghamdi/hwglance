@@ -20,9 +20,10 @@ mod nvml;
 mod pci;
 mod procs;
 mod slow;
+mod statsundo;
 mod steam;
-mod textexport;
 mod text;
+mod textexport;
 mod thresholds;
 mod uiprefs;
 mod util;
@@ -354,8 +355,13 @@ fn run_daemon(cfg: Config) -> io::Result<()> {
         if STOP.load(Ordering::Relaxed) {
             break;
         }
-        if shared.take_reset() {
-            core.reset_stats();
+        for (op, at) in shared.take_stats_ops() {
+            match op {
+                ipc::StatsOp::Reset => core.reset_stats(at),
+                ipc::StatsOp::Undo => {
+                    core.undo_reset_stats(at);
+                }
+            }
         }
         core.queue_threshold_edits(shared.take_edits());
         let mode = cadence.mode(Instant::now(), shared.want_procs(), shared.procs_focused(), shared.need_full_pending(), interval);

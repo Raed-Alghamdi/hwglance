@@ -13,6 +13,7 @@ use crate::memory;
 use crate::nvml::NvmlSource;
 use crate::procs::ProcCollector;
 use crate::slow::{SlowData, SlowPoller};
+use crate::statsundo;
 use crate::thresholds::{Edit, Thresholds};
 use crate::uiprefs::PrefsWatcher;
 use crate::util::{hostname, now_ms, read_trim};
@@ -103,6 +104,8 @@ pub struct Core {
     notifier: Option<Notifier>,
     sweeps: u64,
     crossings: crossings::Tracker,
+    /// What the latest stats reset cleared, for Undo.
+    undo: statsundo::Undo,
     /// All-CPU jiffies since the last process collection (the divisor of the processes' shares).
     proc_jiffies: u64,
 }
@@ -226,6 +229,7 @@ impl Core {
             notifier: None,
             sweeps: 0,
             crossings: crossings::Tracker::new(),
+            undo: statsundo::Undo::default(),
             proc_jiffies: 0,
             cfg,
         }
@@ -276,7 +280,10 @@ impl Core {
         self.notifier = Some(Notifier::new(on_open));
     }
 
-    pub fn reset_stats(&mut self) {
+    /// Clear min/max/average, the throttle history and the finished crossings, keeping what went
+    /// for [`statsundo::WINDOW`] after `at` (when the collector received the request).
+    pub fn reset_stats(&mut self, at: Instant) {
+        self.undo.keep(at, &self.stats, &self.flags, &self.crossings, self.stats_since);
         self.stats.clear();
         for (_, ev) in self.flags.values_mut() {
             *ev = FlagEvents {
@@ -287,6 +294,11 @@ impl Core {
         }
         self.crossings.clear_closed();
         self.stats_since = now_ms();
+    }
+
+    /// Take back the latest reset if `at` is within the window of it. Returns whether it did.
+    pub fn undo_reset_stats(&mut self, at: Instant) -> bool {
+        self.undo.restore(at, &mut self.stats, &mut self.flags, &mut self.crossings, &mut self.stats_since)
     }
 
     /// Take process baselines when collection is about to start, so the first

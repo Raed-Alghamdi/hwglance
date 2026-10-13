@@ -31,7 +31,11 @@ use std::collections::BTreeMap;
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 
-pub const PROTO_VERSION: u32 = 4;
+pub const PROTO_VERSION: u32 = 5;
+
+/// How long after a [`ClientMsg::ResetStats`] the collector still accepts
+/// [`ClientMsg::UndoResetStats`]. Windows show their Undo button for the same time.
+pub const UNDO_RESET_WINDOW_S: u64 = 30;
 
 // ---------------------------------------------------------------------------
 // Sensors
@@ -97,6 +101,19 @@ pub struct FlagEvents {
     pub ended_unix_ms: Option<u64>,
 }
 
+impl FlagEvents {
+    /// Fold in the events counted before these ones (an undone reset): the counts add up, and the
+    /// latest onset and end are the later record's, or the earlier one's where the later has none.
+    pub fn absorb_earlier(&mut self, earlier: &FlagEvents) {
+        let has_later = self.count > 0;
+        self.ended_unix_ms = if has_later { self.ended_unix_ms } else { self.ended_unix_ms.or(earlier.ended_unix_ms) };
+        if !has_later {
+            self.last_unix_ms = earlier.last_unix_ms;
+        }
+        self.count += earlier.count;
+    }
+}
+
 /// Recent values of one reading, oldest first, for the hover graph.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct HistorySeries {
@@ -118,6 +135,18 @@ pub struct Stats {
 impl Stats {
     pub fn first(v: f64) -> Self {
         Stats { min: v, max: v, avg: v, samples: 1 }
+    }
+
+    /// Fold in the statistics of samples taken before these ones (an undone reset).
+    pub fn absorb_earlier(&mut self, earlier: &Stats) {
+        let total = self.samples + earlier.samples;
+        if total == 0 {
+            return;
+        }
+        self.avg = (self.avg * self.samples as f64 + earlier.avg * earlier.samples as f64) / total as f64;
+        self.min = self.min.min(earlier.min);
+        self.max = self.max.max(earlier.max);
+        self.samples = total;
     }
 
     pub fn push(&mut self, v: f64) {
@@ -448,8 +477,14 @@ pub enum ClientMsg {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         unfocused: bool,
     },
-    /// Reset min/max/average for all readings.
+    /// Reset min/max/average for all readings, the throttle history and the finished crossings.
+    /// The collector keeps what was cleared for [`UNDO_RESET_WINDOW_S`] seconds (protocol 5).
     ResetStats,
+    /// Take back the latest [`ClientMsg::ResetStats`] of any client: the collector puts back
+    /// what it cleared, with the samples gathered since folded in. Does nothing once
+    /// [`UNDO_RESET_WINDOW_S`] seconds have passed since that reset, or when there is nothing
+    /// to take back (protocol 5).
+    UndoResetStats,
     /// Ask for the recent history of some readings; answered with `DaemonMsg::History`.
     History { ids: Vec<String>, seconds: u32 },
     /// Set the limits of a reading, replacing its defaults as a whole (`None` is no limit at that
@@ -674,6 +709,10 @@ mod tests {
         assert_eq!(s, r#"{"cmd":"subscribe","procs":true}"#);
         let r: ClientMsg = serde_json::from_str(r#"{"cmd":"reset_stats"}"#).unwrap();
         assert_eq!(r, ClientMsg::ResetStats);
+        // protocol 5: the undo is a plain command with no fields
+        let u: ClientMsg = serde_json::from_str(r#"{"cmd":"undo_reset_stats"}"#).unwrap();
+        assert_eq!(u, ClientMsg::UndoResetStats);
+        assert_eq!(serde_json::to_string(&ClientMsg::UndoResetStats).unwrap(), r#"{"cmd":"undo_reset_stats"}"#);
     }
 
     #[test]
@@ -854,5 +893,31 @@ mod tests {
         assert_eq!(format_value(Unit::Bytes, 13630.0 * 1024.0 * 1024.0), "13.3 GiB");
         assert_eq!(format_value(Unit::BytesPerSec, 2_300_000.0), "2.3 MB/s");
         assert_eq!(format_value(Unit::Celsius, 48.0), "48.0 °C");
+    }
+
+    #[test]
+    fn earlier_stats_and_flag_events_fold_back_in() {
+        let mut after = Stats::first(10.0);
+        after.push(20.0); // avg 15 over 2
+        let mut before = Stats::first(40.0);
+        before.push(60.0);
+        before.push(80.0); // min 40, max 80, avg 60 over 3
+        after.absorb_earlier(&before);
+        assert_eq!((after.min, after.max, after.samples), (10.0, 80.0, 5));
+        assert!((after.avg - (30.0 + 180.0) / 5.0).abs() < 1e-9);
+
+        let before = FlagEvents { count: 2, last_unix_ms: 500, ended_unix_ms: Some(600) };
+        // nothing since the reset: the earlier record stands
+        let mut none = FlagEvents { count: 0, last_unix_ms: 0, ended_unix_ms: None };
+        none.absorb_earlier(&before);
+        assert_eq!(none, before);
+        // it ended after the reset without a new onset: the end is the newer one
+        let mut ended = FlagEvents { count: 0, last_unix_ms: 0, ended_unix_ms: Some(900) };
+        ended.absorb_earlier(&FlagEvents { count: 2, last_unix_ms: 500, ended_unix_ms: None });
+        assert_eq!(ended, FlagEvents { count: 2, last_unix_ms: 500, ended_unix_ms: Some(900) });
+        // a new onset since the reset: counts add, the newer onset and end win
+        let mut newer = FlagEvents { count: 1, last_unix_ms: 800, ended_unix_ms: None };
+        newer.absorb_earlier(&before);
+        assert_eq!(newer, FlagEvents { count: 3, last_unix_ms: 800, ended_unix_ms: None });
     }
 }

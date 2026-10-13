@@ -347,63 +347,67 @@ pub fn slider(ui: &mut egui::Ui, pal: &Palette, name: &str, slider: egui::Slider
 }
 
 // ---------------------------------------------------------------------------
-// Two-step confirm
+// Reset with Undo
 // ---------------------------------------------------------------------------
 
-/// What a click on a two-step button did.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ConfirmStep {
-    /// The first click: ask for the second.
-    Arm,
-    /// The second click: do it.
-    Confirm,
-    /// Cancel was clicked.
-    Cancel,
+/// What an offered Undo looks like.
+pub struct UndoOffer<'a> {
+    /// Time left to take the reset back.
+    pub left: std::time::Duration,
+    /// The whole window, for the proportion of the bar.
+    pub total: std::time::Duration,
+    /// What comes back, as a phrase ("low, high and average since 11:30").
+    pub what: &'a str,
 }
 
-/// Texts and state of a two-step button.
-pub struct Confirm<'a> {
+/// Texts and state of a reset button. One click resets; while an Undo is on offer the same
+/// button reads "Undo" instead, at the same place and size.
+pub struct ResetButton<'a> {
     pub enabled: bool,
-    /// The idle button.
+    /// The idle button: "Reset", "Reset layout".
     pub label: &'a str,
-    /// The red button after the first click: "Click again to ..." with what it clears.
-    pub armed_label: &'a str,
     pub tip: &'a str,
     pub disabled_tip: &'a str,
-    /// In a right-to-left row Cancel is laid out first, so it still ends up right of the question.
-    pub rtl: bool,
+    pub undo: Option<UndoOffer<'a>>,
 }
 
-/// A button that needs two clicks, the pattern of "Reset all customisations": the first click
-/// turns it into a red "Click again ..." button with a Cancel beside it, naming what will be
-/// cleared. `armed` is the caller's state; the returned step says what to do with it.
-pub fn confirm_button(ui: &mut egui::Ui, pal: &Palette, armed: bool, c: &Confirm) -> Option<ConfirmStep> {
-    let mut step = None;
-    if armed {
-        let ask = |ui: &mut egui::Ui| ui.button(egui::RichText::new(c.armed_label).color(pal.crit)).clicked();
-        let (confirm, cancel) = if c.rtl {
-            let cancel = ui.button("Cancel").clicked();
-            (ask(ui), cancel)
-        } else {
-            let confirm = ask(ui);
-            (confirm, ui.button("Cancel").clicked())
-        };
-        if confirm {
-            step = Some(ConfirmStep::Confirm);
-        } else if cancel {
-            step = Some(ConfirmStep::Cancel);
-        }
-    } else {
-        let mut b = ui.add_enabled(c.enabled, egui::Button::new(c.label));
-        b = b.on_hover_text(c.tip);
+/// A button that resets on one click and then offers "Undo" for a while: a thin bar along its
+/// bottom edge shows the time left, in whole seconds (a stepped readout, not an animation).
+/// Returns whether it was clicked; the caller knows from its own state whether that meant Reset
+/// or Undo. It is one widget in one place in both states, so keyboard focus stays on it.
+pub fn reset_button(ui: &mut egui::Ui, pal: &Palette, c: &ResetButton) -> bool {
+    use crate::a11y::{self, Spoken};
+    let pad = ui.spacing().button_padding.x;
+    let width_of = |text: &str| {
+        egui::WidgetText::from(text).into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::TextStyle::Button).size().x + 2.0 * pad
+    };
+    // "Undo" takes the room of the button it replaces, so nothing around it moves
+    let size = egui::vec2(width_of(c.label).max(width_of("Undo")), 0.0);
+    let Some(undo) = &c.undo else {
+        let mut b = ui.add_enabled(c.enabled, egui::Button::new(c.label).min_size(size)).on_hover_text(c.tip);
         if !c.disabled_tip.is_empty() {
             b = b.on_disabled_hover_text(c.disabled_tip);
         }
-        if b.clicked() {
-            step = Some(ConfirmStep::Arm);
-        }
+        return b.clicked();
+    };
+    let secs = undo.left.as_secs_f32().ceil().max(1.0);
+    let tip = format!("Bring back {}. {secs:.0} s left; Ctrl+Z undoes the latest reset.", undo.what);
+    // added the same way as the idle button (add_enabled makes a child ui), so its id and the focus stay
+    let b = ui.add_enabled(true, egui::Button::new("Undo").min_size(size)).on_hover_text(tip);
+    let total = undo.total.as_secs();
+    a11y::publish(&b, || {
+        Spoken::button("Undo reset").described(format!("Brings back {}. Available for {total} seconds.", undo.what))
+    });
+    // the bar: a track in the rule colour, the time left in ink 3, inset from the rounded corners
+    let frac = (secs / undo.total.as_secs_f32().max(1.0)).clamp(0.0, 1.0);
+    let r = b.rect;
+    let (x0, x1, y) = (r.left() + 7.0, r.right() - 7.0, r.bottom() - 4.0);
+    if x1 > x0 {
+        let stroke = |color| egui::Stroke::new(2.0, color);
+        ui.painter().line_segment([egui::pos2(x0, y), egui::pos2(x1, y)], stroke(pal.rule));
+        ui.painter().line_segment([egui::pos2(x0, y), egui::pos2(x0 + (x1 - x0) * frac, y)], stroke(pal.ink3));
     }
-    step
+    b.clicked()
 }
 
 /// A row of controls against the right edge, laid out left to right. A right-to-left layout

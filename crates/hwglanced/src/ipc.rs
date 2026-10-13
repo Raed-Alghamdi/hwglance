@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 type Bytes = Arc<Vec<u8>>;
 
@@ -120,10 +120,22 @@ pub struct Demand {
     pub slim: bool,
 }
 
+/// A request to clear the statistics or to take that back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StatsOp {
+    Reset,
+    Undo,
+}
+
+/// More than this many waiting for one sample are a flood; the oldest go.
+const MAX_STATS_OPS: usize = 16;
+
 pub struct Shared {
     clients: Mutex<Vec<Arc<Client>>>,
     latest: Mutex<Option<Latest>>,
-    reset: AtomicBool,
+    /// Stats resets and undos asked for by windows, in arrival order, each with the moment the
+    /// request arrived (the undo window counts from there). Taken by the sampling loop.
+    stats_ops: Mutex<Vec<(StatsOp, Instant)>>,
     /// Limit changes asked for by windows, taken by the sampling loop.
     edits: Mutex<Vec<Edit>>,
     /// A slim client needs the next snapshot to carry every process' static fields.
@@ -138,7 +150,7 @@ impl Shared {
         Arc::new(Shared {
             clients: Mutex::new(Vec::new()),
             latest: Mutex::new(None),
-            reset: AtomicBool::new(false),
+            stats_ops: Mutex::new(Vec::new()),
             edits: Mutex::new(Vec::new()),
             need_full: AtomicBool::new(false),
             history,
@@ -189,9 +201,17 @@ impl Shared {
         self.need_full.swap(false, Ordering::AcqRel)
     }
 
-    /// Whether a client asked to reset statistics since the last call.
-    pub fn take_reset(&self) -> bool {
-        self.reset.swap(false, Ordering::AcqRel)
+    /// The stats resets and undos asked for since the last call, oldest first.
+    pub fn take_stats_ops(&self) -> Vec<(StatsOp, Instant)> {
+        std::mem::take(&mut *self.stats_ops.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+
+    fn push_stats_op(&self, op: StatsOp) {
+        let mut q = self.stats_ops.lock().unwrap_or_else(|e| e.into_inner());
+        if q.len() >= MAX_STATS_OPS {
+            q.remove(0);
+        }
+        q.push((op, Instant::now()));
     }
 
     /// The limit changes asked for since the last call, oldest first.
@@ -359,7 +379,8 @@ fn handle(stream: UnixStream, shared: Arc<Shared>) {
                     let _ = shared.kick.send(());
                 }
             }
-            Ok(Some(ClientMsg::ResetStats)) => shared.reset.store(true, Ordering::Release),
+            Ok(Some(ClientMsg::ResetStats)) => shared.push_stats_op(StatsOp::Reset),
+            Ok(Some(ClientMsg::UndoResetStats)) => shared.push_stats_op(StatsOp::Undo),
             Ok(Some(ClientMsg::SetThreshold { id, warn, crit, below })) => {
                 // a limit that is not a number would poison the file: it is not accepted
                 if [warn, crit].iter().flatten().all(|v| v.is_finite()) {
@@ -528,6 +549,39 @@ mod tests {
         let all = shared.take_edits();
         assert_eq!(all.len(), MAX_EDITS);
         assert_eq!(all[0], Edit::Reset { id: "r10".into() });
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn stats_resets_and_undos_arrive_in_order_with_their_arrival_time() {
+        let dir = std::env::temp_dir().join(format!("hwglance-ipc-undo-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("daemon.sock");
+        let (kick, _rx) = std::sync::mpsc::channel();
+        let shared = Shared::new(kick, Arc::new(Mutex::new(History::new(0, 1))));
+        serve(&path, shared.clone()).unwrap();
+        let t0 = Instant::now();
+        let mut c = UnixStream::connect(&path).unwrap();
+        write_msg(&mut c, &ClientMsg::ResetStats).unwrap();
+        write_msg(&mut c, &ClientMsg::UndoResetStats).unwrap();
+        write_msg(&mut c, &ClientMsg::ResetStats).unwrap();
+        let mut got = Vec::new();
+        for _ in 0..200 {
+            got.extend(shared.take_stats_ops());
+            if got.len() == 3 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        let ops: Vec<_> = got.iter().map(|(op, _)| *op).collect();
+        assert_eq!(ops, [StatsOp::Reset, StatsOp::Undo, StatsOp::Reset]);
+        assert!(got.iter().all(|(_, at)| *at >= t0), "stamped when received");
+        assert!(got.windows(2).all(|w| w[0].1 <= w[1].1));
+        assert!(shared.take_stats_ops().is_empty(), "taken once");
+        for _ in 0..(MAX_STATS_OPS + 5) {
+            shared.push_stats_op(StatsOp::Reset);
+        }
+        assert_eq!(shared.take_stats_ops().len(), MAX_STATS_OPS);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

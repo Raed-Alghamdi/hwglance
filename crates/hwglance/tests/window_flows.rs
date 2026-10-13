@@ -1,4 +1,4 @@
-//! The window's destructive actions and core flows: the two-step resets, the critical End task
+//! The window's destructive actions and core flows: the resets with Undo, the critical End task
 //! dialog, the reading menu and its threshold fields, adding a threshold in Settings, what
 //! follows End task, the popover without a stacked tooltip, and the Settings window. Process
 //! kills only ever reach a dummy `sleep` child of the test (or nothing at all).
@@ -7,14 +7,14 @@ mod common;
 
 use common::*;
 use egui::{pos2, Key, Modifiers};
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use hwglance::actions::parse_start_ticks;
 use hwglance::app::{KillState, ResetKind, SettingsTab};
 use hwglance::model::RowId;
 use hwglance::settings::Settings;
-use hwglance_proto::{ProcClass, ProcGroup, ProcInfo, Snapshot};
+use hwglance_proto::{ClientMsg, ProcClass, ProcGroup, ProcInfo, Snapshot};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// First reading of the CPU card (temperatures lead every card, and Tctl is their first row).
 const TCTL: &str = "cpu/temp/tctl";
@@ -87,122 +87,290 @@ fn ctrl_r(h: &mut H) {
 }
 
 // ---------------------------------------------------------------------------
-// Item 1: the resets ask twice
+// Item 1: every reset acts at once and offers Undo for 30 seconds
 // ---------------------------------------------------------------------------
 
-#[test]
-fn the_top_bar_reset_asks_twice_and_names_what_it_clears() {
-    let mut h = harness("reset-stats", (2048.0, 1150.0), demo_snapshot(), None, false, false);
-    assert!(!app(&mut h).link.take_demo_reset());
-    h.get_by_label("Reset").click();
+fn ctrl_z(h: &mut H) {
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     h.run_steps(3);
-    assert!(app(&mut h).is_armed(ResetKind::Stats), "the first click only arms it");
-    assert!(!app(&mut h).link.take_demo_reset(), "nothing is cleared yet");
-    let q = h.query_by_label_contains("Click again to clear low, high, average, throttle history and crossings since ");
-    assert!(q.is_some(), "the question names what goes");
+}
 
-    // Cancel drops it
-    h.get_by_label("Cancel").click();
-    h.run_steps(3);
-    assert!(app(&mut h).armed.is_none());
-    assert!(!app(&mut h).link.take_demo_reset());
+/// Pretend the reset of this kind happened `secs` ago.
+fn age_undo(h: &mut H, kind: ResetKind, secs: u64) {
+    let e = app(h).undo.iter_mut().find(|e| e.kind == kind).expect("an undo is on offer");
+    e.at = Instant::now() - Duration::from_secs(secs);
+}
 
-    // the second click does it
-    h.get_by_label("Reset").click();
-    h.run_steps(3);
-    h.get_by_label_contains("Click again to clear low, high, average").click();
-    h.run_steps(3);
-    assert!(app(&mut h).armed.is_none());
-    assert!(app(&mut h).link.take_demo_reset(), "the stats were reset");
+fn stats_msgs(h: &mut H) -> Vec<ClientMsg> {
+    app(h).link.take_demo_stats()
 }
 
 #[test]
-fn ctrl_r_arms_the_same_confirm_and_never_while_typing() {
-    let mut h = harness("reset-ctrl-r", (2048.0, 1150.0), demo_snapshot(), None, false, false);
-    ctrl_r(&mut h);
-    assert!(app(&mut h).is_armed(ResetKind::Stats));
-    assert!(!app(&mut h).link.take_demo_reset(), "Ctrl+R does not reset by itself");
-    ctrl_r(&mut h);
-    assert!(app(&mut h).is_armed(ResetKind::Stats));
-    assert!(!app(&mut h).link.take_demo_reset(), "nor does a second Ctrl+R");
-    // Esc drops it
-    h.key_press(Key::Escape);
+fn the_top_bar_reset_acts_at_once_and_becomes_undo() {
+    let _guard = layout_lock();
+    let mut h = harness("reset-stats", (2048.0, 1150.0), demo_snapshot(), None, false, false);
+    assert!(stats_msgs(&mut h).is_empty());
+    let idle = h.get_by_label("Reset").rect();
+    h.get_by_label("Reset").click();
     h.run_steps(3);
-    assert!(app(&mut h).armed.is_none());
+    assert_eq!(stats_msgs(&mut h), [ClientMsg::ResetStats], "one click resets");
+    assert!(app(&mut h).undo_offer(ResetKind::Stats).is_some());
+    assert!(h.query_by_label("Reset").is_none(), "the button reads Undo now");
+    let undo = h.get_by_label("Undo reset");
+    assert_eq!(undo.rect(), idle, "same place and size, so nothing around it moves");
+    let ak = undo.accesskit_node();
+    assert_eq!(ak.role(), egui::accesskit::Role::Button);
+    let d = ak.description().unwrap();
+    assert!(d.starts_with("Brings back low, high, average, throttle history and crossings since "), "{d}");
+    assert!(d.ends_with("Available for 30 seconds."), "{d}");
 
-    // in the search field Ctrl+R does nothing at all
+    // Undo asks the collector to put it back, and the plain Reset returns
+    h.get_by_label("Undo reset").click();
+    h.run_steps(3);
+    assert_eq!(stats_msgs(&mut h), [ClientMsg::UndoResetStats]);
+    assert!(app(&mut h).undo.is_empty());
+    assert!(h.query_by_label("Undo reset").is_none());
+    assert_eq!(h.get_by_label("Reset").rect(), idle);
+}
+
+#[test]
+fn undo_runs_out_after_30_seconds() {
+    let mut h = harness("reset-expire", (2048.0, 1150.0), demo_snapshot(), None, false, false);
+    h.get_by_label("Reset").click();
+    h.run_steps(3);
+    stats_msgs(&mut h);
+    age_undo(&mut h, ResetKind::Stats, 29);
+    h.run_steps(3);
+    assert!(h.query_by_label("Undo reset").is_some(), "29 s in, it is still there");
+    age_undo(&mut h, ResetKind::Stats, 31);
+    h.run_steps(3);
+    assert!(h.query_by_label("Undo reset").is_none(), "after 30 s it is the plain Reset again");
+    assert!(h.query_by_label("Reset").is_some());
+    assert!(app(&mut h).undo.is_empty());
+    // neither the button nor Ctrl+Z reaches the collector any more
+    ctrl_z(&mut h);
+    assert!(stats_msgs(&mut h).is_empty());
+}
+
+#[test]
+fn a_late_undo_that_slips_through_does_nothing() {
+    let mut h = harness("reset-late", (2048.0, 1150.0), demo_snapshot(), None, false, false);
+    h.get_by_label("Reset").click();
+    h.run_steps(3);
+    stats_msgs(&mut h);
+    age_undo(&mut h, ResetKind::Stats, 31);
+    app(&mut h).undo_reset(ResetKind::Stats);
+    assert!(stats_msgs(&mut h).is_empty(), "the window does not even ask");
+    assert!(app(&mut h).undo.is_empty());
+}
+
+#[test]
+fn ctrl_r_resets_at_once_and_ctrl_z_takes_it_back() {
+    let mut h = harness("reset-ctrl-r", (2048.0, 1150.0), demo_snapshot(), None, false, false);
+    ctrl_z(&mut h);
+    assert!(stats_msgs(&mut h).is_empty(), "nothing to undo yet");
+    ctrl_r(&mut h);
+    assert_eq!(stats_msgs(&mut h), [ClientMsg::ResetStats]);
+    assert!(h.query_by_label("Undo reset").is_some());
+    ctrl_z(&mut h);
+    assert_eq!(stats_msgs(&mut h), [ClientMsg::UndoResetStats]);
+    assert!(app(&mut h).undo.is_empty());
+    assert!(h.query_by_label("Reset").is_some());
+
+    // a second reset inside the window replaces the first offer: Undo goes back to the state
+    // before the latest reset, and the time starts again
+    ctrl_r(&mut h);
+    age_undo(&mut h, ResetKind::Stats, 20);
+    ctrl_r(&mut h);
+    assert_eq!(stats_msgs(&mut h), [ClientMsg::ResetStats, ClientMsg::ResetStats]);
+    assert_eq!(app(&mut h).undo.len(), 1);
+    let left = app(&mut h).undo_offer(ResetKind::Stats).unwrap().left;
+    assert!(left > Duration::from_secs(28), "the window restarted: {left:?}");
+    ctrl_z(&mut h);
+    assert_eq!(stats_msgs(&mut h), [ClientMsg::UndoResetStats], "one undo, for the latest reset");
+    ctrl_z(&mut h);
+    assert!(stats_msgs(&mut h).is_empty(), "and nothing more to take back");
+}
+
+#[test]
+fn ctrl_r_and_ctrl_z_leave_a_text_field_alone() {
+    let mut h = harness("reset-typing", (2048.0, 1150.0), demo_snapshot(), None, false, false);
+    ctrl_r(&mut h);
+    stats_msgs(&mut h);
+    // in the search field Ctrl+Z is the field's own undo and Ctrl+R does nothing
     h.key_press(Key::Slash);
     h.run_steps(3);
     assert!(h.ctx.egui_wants_keyboard_input(), "the search field has focus");
+    ctrl_z(&mut h);
+    assert!(stats_msgs(&mut h).is_empty(), "Ctrl+Z is not taken from a text field");
+    assert!(app(&mut h).undo_offer(ResetKind::Stats).is_some(), "the undo is still on offer");
     ctrl_r(&mut h);
-    assert!(app(&mut h).armed.is_none(), "not armed while typing");
-    assert!(!app(&mut h).link.take_demo_reset());
+    assert!(stats_msgs(&mut h).is_empty(), "Ctrl+R does nothing while typing");
 }
 
 #[test]
-fn reset_layout_in_the_edit_bar_asks_twice() {
+fn keyboard_focus_stays_on_the_button_through_reset_and_undo() {
+    let mut h = harness("reset-focus", (2048.0, 1150.0), demo_snapshot(), None, false, false);
+    h.get_by_label("Reset").focus();
+    h.run_steps(2);
+    assert!(h.get_by_label("Reset").is_focused());
+    h.key_press(Key::Enter);
+    h.run_steps(3);
+    assert!(h.get_by_label("Undo reset").is_focused(), "focus stays after the reset");
+    assert_eq!(stats_msgs(&mut h), [ClientMsg::ResetStats]);
+    h.key_press(Key::Enter);
+    h.run_steps(3);
+    assert!(h.get_by_label("Reset").is_focused(), "and after the undo");
+    assert_eq!(stats_msgs(&mut h), [ClientMsg::UndoResetStats]);
+}
+
+#[test]
+fn ctrl_z_takes_back_the_most_recent_reset_of_any_kind() {
     let mut s = Settings::default();
     s.layout.auto = false;
     s.layout.section_order.insert("cpu".into(), vec!["cpu/temp".into()]);
-    let mut h = harness("reset-layout", (2048.0, 1150.0), demo_snapshot(), Some(s), false, false);
+    let mut h = harness("reset-latest", (2048.0, 1150.0), demo_snapshot(), Some(s), false, false);
     app(&mut h).edit_layout = true;
     h.run_steps(3);
     h.get_by_label("Reset layout").click();
     h.run_steps(3);
-    assert!(app(&mut h).is_armed(ResetKind::EditLayout));
-    assert!(!app(&mut h).s.layout.auto, "the layout is still the custom one");
+    age_undo(&mut h, ResetKind::Layout, 5);
+    ctrl_r(&mut h);
+    assert_eq!(app(&mut h).undo.len(), 2);
+    ctrl_z(&mut h);
+    assert_eq!(stats_msgs(&mut h), [ClientMsg::ResetStats, ClientMsg::UndoResetStats], "the stats reset was the latest");
+    assert!(app(&mut h).s.layout.auto, "the layout reset stays");
+    ctrl_z(&mut h);
+    assert!(!app(&mut h).s.layout.auto, "then the layout comes back");
     assert!(!app(&mut h).s.layout.section_order.is_empty());
-    h.get_by_label_contains("Click again to clear your columns").click();
-    h.run_steps(3);
-    assert!(app(&mut h).s.layout.auto);
-    assert!(app(&mut h).s.layout.section_order.is_empty());
-    assert!(app(&mut h).armed.is_none());
-
-    // leaving edit mode drops an armed question
-    h.get_by_label("Reset layout").click();
-    h.run_steps(3);
-    assert!(app(&mut h).armed.is_none() || app(&mut h).is_armed(ResetKind::EditLayout));
-    app(&mut h).edit_layout = false;
-    h.run_steps(3);
-    assert!(app(&mut h).armed.is_none());
 }
 
 #[test]
-fn settings_resets_for_layout_and_views_ask_twice() {
+fn reset_layout_in_the_edit_bar_acts_at_once_and_undo_restores_it_exactly() {
+    let _guard = layout_lock();
+    let mut s = Settings::default();
+    s.layout.auto = false;
+    s.layout.section_order.insert("cpu".into(), vec!["cpu/temp".into()]);
+    s.layout.reading_order.insert("cpu/temp".into(), vec!["cpu/temp/tctl".into()]);
+    s.layout.collapsed_cards.push("memory".into());
+    let before = s.layout.clone();
+    let mut h = harness("reset-layout", (2048.0, 1150.0), demo_snapshot(), Some(s), false, false);
+    app(&mut h).edit_layout = true;
+    h.run_steps(10);
+    let idle = h.get_by_label("Reset layout").rect();
+    h.get_by_label("Reset layout").click();
+    h.run_steps(10);
+    assert!(app(&mut h).s.layout.auto, "reset at once");
+    assert!(app(&mut h).s.layout.section_order.is_empty());
+    assert_eq!(app(&mut h).s.layout.collapsed_cards, ["memory"], "collapsed panels are kept");
+    let undo = h.get_by_label("Undo reset");
+    assert_eq!(undo.rect(), idle);
+    assert!(undo.accesskit_node().description().unwrap().contains("your columns and the order of panels"));
+
+    // a change made in the meantime that the reset does not touch survives the undo
+    app(&mut h).s.layout.collapsed_cards.push("gpu0".into());
+    h.get_by_label("Undo reset").click();
+    h.run_steps(3);
+    let now = app(&mut h).s.layout.clone();
+    assert!(!now.auto);
+    assert_eq!(now.section_order, before.section_order);
+    assert_eq!(now.reading_order, before.reading_order);
+    assert_eq!(now.columns, before.columns);
+    assert_eq!(now.collapsed_cards, ["memory", "gpu0"]);
+    assert!(h.query_by_label("Reset layout").is_some());
+    assert!(app(&mut h).undo.is_empty());
+}
+
+#[test]
+fn the_settings_layout_button_shares_the_edit_bars_undo() {
     let mut s = Settings::default();
     s.layout.auto = false;
     s.layout.reading_order.insert("cpu/temp".into(), vec!["cpu/temp/tctl".into()]);
-    s.processes.views.right_expanded.size = Some(0.3);
-    let mut h = harness("reset-settings", (2048.0, 1150.0), demo_snapshot(), Some(s), false, true);
+    let before = s.layout.clone();
+    let mut h = harness("reset-settings-layout", (2048.0, 1150.0), demo_snapshot(), Some(s), false, true);
     app(&mut h).settings_tab = SettingsTab::Layout;
     h.run_steps(4);
     h.get_by_label("Reset to automatic").click();
     h.run_steps(3);
-    assert!(app(&mut h).is_armed(ResetKind::LayoutAuto));
-    assert!(!app(&mut h).s.layout.auto, "not yet");
-    h.get_by_label_contains("Click again to clear your 0 columns").click();
-    h.run_steps(3);
     assert!(app(&mut h).s.layout.auto);
     assert!(app(&mut h).s.layout.reading_order.is_empty());
+    // the button is disabled when there is nothing to reset, but Undo is not
+    h.get_by_label("Undo reset").click();
+    h.run_steps(3);
+    assert_eq!(app(&mut h).s.layout, before);
+    assert!(h.query_by_label("Reset to automatic").is_some());
+}
 
+#[test]
+fn reset_views_acts_at_once_and_undo_restores_them() {
+    let _guard = layout_lock();
+    let mut s = Settings::default();
+    s.processes.views.right_expanded.size = Some(0.3);
+    let before = s.processes.views.clone();
+    let mut h = harness("reset-views", (2048.0, 1150.0), demo_snapshot(), Some(s), false, true);
+    app(&mut h).settings_tab = SettingsTab::Processes;
+    h.run_steps(10);
+    let idle = h.get_by_label("Reset views").rect();
+    h.get_by_label("Reset views").click();
+    h.run_steps(10);
+    assert_ne!(app(&mut h).s.processes.views.right_expanded.size, Some(0.3), "reset at once");
+    assert_eq!(h.get_by_label("Undo reset").rect(), idle);
+    h.get_by_label("Undo reset").click();
+    h.run_steps(3);
+    assert_eq!(app(&mut h).s.processes.views, before);
+    assert!(h.query_by_label("Reset views").is_some());
+
+    // the offer lasts when the tab changes (Ctrl+Z works from anywhere), and runs out
+    h.get_by_label("Reset views").click();
+    h.run_steps(3);
+    app(&mut h).settings_tab = SettingsTab::History;
+    h.run_steps(3);
+    assert!(app(&mut h).undo_offer(ResetKind::ProcViews).is_some());
+    age_undo(&mut h, ResetKind::ProcViews, 31);
+    h.run_steps(3);
+    app(&mut h).settings_tab = SettingsTab::Processes;
+    h.run_steps(3);
+    assert!(h.query_by_label("Reset views").is_some(), "plain Reset again after 30 s");
+    assert_ne!(app(&mut h).s.processes.views, before, "and the reset stays");
+}
+
+#[test]
+fn reset_all_customisations_acts_at_once_and_undo_restores_everything_it_cleared() {
+    let _guard = layout_lock();
+    let mut s = Settings::default();
+    s.sensors.hidden.push("cpu/temp/tctl".into());
+    s.appearance.font_size = 17.0;
+    s.layout.auto = false;
+    let before = s.clone();
+    let mut h = harness("reset-all", (2048.0, 1150.0), demo_snapshot(), Some(s), false, true);
+    app(&mut h).settings_tab = SettingsTab::General;
+    h.run_steps(4);
+    h.get_by_role_and_label(egui::accesskit::Role::Button, "Reset all customisations").click();
+    h.run_steps(3);
+    assert!(app(&mut h).s.sensors.hidden.is_empty(), "reset at once");
+    assert_eq!(app(&mut h).s.appearance.font_size, hwglance::settings::DEFAULT_FONT_SIZE);
+    // the bar widget and alert choices are kept by the reset, and by the undo as they are now
+    app(&mut h).s.tray.popup_process_count = 11;
+    let tray_now = app(&mut h).s.tray.clone();
+    h.get_by_label("Undo reset").click();
+    h.run_steps(3);
+    let now = app(&mut h).s.clone();
+    assert_eq!(now.sensors, before.sensors);
+    assert_eq!(now.appearance, before.appearance);
+    assert_eq!(now.layout, before.layout);
+    assert_eq!(now.tray, tray_now);
+    assert!(h.query_by_role_and_label(egui::accesskit::Role::Button, "Reset all customisations").is_some());
+}
+
+#[test]
+fn a_reset_that_changes_nothing_offers_no_undo() {
+    let mut h = harness("reset-noop", (2048.0, 1150.0), demo_snapshot(), None, false, true);
     app(&mut h).settings_tab = SettingsTab::Processes;
     h.run_steps(4);
     h.get_by_label("Reset views").click();
     h.run_steps(3);
-    assert!(app(&mut h).is_armed(ResetKind::ProcViews));
-    assert_eq!(app(&mut h).s.processes.views.right_expanded.size, Some(0.3), "not yet");
-    h.get_by_label_contains("Click again to reset the sizes").click();
-    h.run_steps(3);
-    assert_ne!(app(&mut h).s.processes.views.right_expanded.size, Some(0.3));
-    assert!(app(&mut h).armed.is_none());
-
-    // a question on another tab is gone when the tab changes
-    h.get_by_label("Reset views").click();
-    h.run_steps(3);
-    assert!(app(&mut h).is_armed(ResetKind::ProcViews));
-    app(&mut h).settings_tab = SettingsTab::History;
-    h.run_steps(3);
-    assert!(app(&mut h).armed.is_none());
+    assert!(app(&mut h).undo.is_empty());
+    assert!(h.query_by_label("Reset views").is_some());
 }
 
 // ---------------------------------------------------------------------------
@@ -590,16 +758,18 @@ fn tag() -> &'static str {
 const SHOT: (f32, f32) = (2546.0, 1400.0);
 
 #[test]
-fn shot_resets_armed() {
+fn shot_resets_undo() {
     let (snap, _) = demo_scene(hwglance::demo::T_START + 30.0);
     let mut h = harness("shot-reset", SHOT, snap, None, true, false);
     h.get_by_label("Reset").click();
     h.run_steps(3);
-    save(&mut h, &format!("reset-stats-armed-{}.png", tag()));
+    age_undo(&mut h, ResetKind::Stats, 9);
+    h.run_steps(3);
+    save(&mut h, &format!("reset-stats-undo-{}.png", tag()));
 }
 
 #[test]
-fn shot_reset_layout_armed() {
+fn shot_reset_layout_undo() {
     let (snap, _) = demo_scene(hwglance::demo::T_START + 30.0);
     let mut s = Settings::default();
     s.layout.auto = false;
@@ -609,7 +779,7 @@ fn shot_reset_layout_armed() {
     h.run_steps(3);
     h.get_by_label("Reset layout").click();
     h.run_steps(3);
-    save(&mut h, &format!("reset-layout-armed-{}.png", tag()));
+    save(&mut h, &format!("reset-layout-undo-{}.png", tag()));
 }
 
 #[test]

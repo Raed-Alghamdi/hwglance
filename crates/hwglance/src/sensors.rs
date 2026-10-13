@@ -9,7 +9,7 @@ use crate::rangebar;
 use crate::settings::{LayoutPrefs, Settings};
 use crate::theme::{base, fs, snap4, Level, Palette};
 use crate::thresholds::{default_thr, effective, level_of, Pending, Thr, ThrEdit};
-use crate::ui_kit::{self, confirm_button, ellipsized, f_flag, f_label, f_label_bold, f_minmax, f_result, f_section, f_small, f_unit, icon, Confirm, ConfirmStep, Device, RowUnit};
+use crate::ui_kit::{self, ellipsized, f_flag, f_label, f_label_bold, f_minmax, f_result, f_section, f_small, f_unit, icon, ResetButton, UndoOffer, Device, RowUnit};
 use egui::{pos2, vec2, Align, Align2, Color32, DragAndDrop, FontId, Rect, RichText, Sense, Stroke, Ui};
 use hwglance_proto::{format_value, Reading, Section, SensorGroup, Snapshot, Unit};
 use std::collections::BTreeMap;
@@ -509,8 +509,8 @@ pub struct ViewOut {
     pub card_rects: Vec<(String, Rect)>,
     /// Cards whose header is pinned at the top of the view right now.
     pub sticky: Vec<String>,
-    /// A click on the edit bar's Reset layout.
-    pub reset_layout: Option<ConfirmStep>,
+    /// The edit bar's Reset layout (or its Undo) was clicked.
+    pub reset_layout: bool,
     /// Each card's one Tab stop this frame: its widget id, the card and where it sits.
     pub stops: Vec<(egui::Id, String, Option<NavKey>)>,
     /// Limit changes made in a reading's menu, for the app to send to the collector.
@@ -597,8 +597,8 @@ pub struct SensorView<'a> {
     /// Hovering a row opens the history popover, which carries what the tooltip would say: no
     /// tooltip then (edit mode, where the popover is off, keeps it).
     pub popover: bool,
-    /// The edit bar's Reset layout was clicked once and waits for the second click.
-    pub reset_armed: bool,
+    /// The edit bar's Reset layout reads Undo while this is on offer.
+    pub layout_undo: Option<UndoOffer<'a>>,
     /// Where each card's Tab stop is.
     pub nav: &'a mut NavCursor,
     /// Limit changes sent that the snapshots may not show yet (the editor keeps their values).
@@ -882,16 +882,15 @@ fn edit_bar(ui: &mut Ui, v: &mut SensorView, arr: &[Column], shown: usize) {
                     layout::freeze(&mut v.s.layout, arr);
                     layout::add_column(&mut v.s.layout);
                 }
-                let c = Confirm {
+                let c = ResetButton {
                     enabled: true,
                     label: "Reset layout",
-                    armed_label: "Click again to clear your columns and the order of panels, sections and rows",
-                    tip: "Back to the automatic arrangement. Asks again before it does.",
+                    tip: "Back to the automatic arrangement: clears your columns and the order of panels, sections and rows.",
                     disabled_tip: "",
-                    rtl: false,
+                    undo: v.layout_undo.take(),
                 };
-                if let Some(step) = confirm_button(ui, pal, v.reset_armed, &c) {
-                    v.out.reset_layout = Some(step);
+                if ui_kit::reset_button(ui, pal, &c) {
+                    v.out.reset_layout = true;
                 }
                 if ui.button("Done").clicked() {
                     v.out.stop_editing = true;

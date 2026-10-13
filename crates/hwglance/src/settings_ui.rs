@@ -10,7 +10,7 @@ use crate::sensors::threshold_editor;
 use crate::settings::{self, Settings, HISTORY_CHOICES};
 use crate::theme::{base, fs, ThemeChoice};
 use crate::thresholds::ThrEdit;
-use crate::ui_kit::{confirm_button, f_icon, f_label_bold, icon, Confirm};
+use crate::ui_kit::{f_icon, f_label_bold, icon, reset_button, ResetButton};
 use egui::{vec2, Context, RichText, Ui};
 use hwglance_proto::{self as proto, Reading, Snapshot, Unit};
 use std::collections::HashMap;
@@ -271,23 +271,16 @@ impl App {
         ui.separator();
         ui.label(RichText::new("Reset all customisations").font(f_label_bold()));
         ui.label("Clears hidden and watched values, collapsed values, layout, process, theme and font settings. The bar widget and alert choices are kept, and so are the limits in thresholds.json.");
-        let confirm_id = egui::Id::new("reset-all-confirm");
-        let armed: bool = ui.data(|d| d.get_temp(confirm_id)).unwrap_or(false);
-        ui.horizontal(|ui| {
-            if armed {
-                if ui.button(RichText::new("Click again to reset everything").color(self.pal.crit)).clicked() {
-                    self.s.reset_customisations();
-                    ui.data_mut(|d| d.insert_temp(confirm_id, false));
-                    self.rows_dirty = true;
-                    self.force_resort = true;
-                }
-                if ui.button("Cancel").clicked() {
-                    ui.data_mut(|d| d.insert_temp(confirm_id, false));
-                }
-            } else if ui.button("Reset all customisations").clicked() {
-                ui.data_mut(|d| d.insert_temp(confirm_id, true));
-            }
-        });
+        let c = ResetButton {
+            enabled: true,
+            label: "Reset all customisations",
+            tip: "Clear hidden and watched values, collapsed values, layout, process, theme and font settings.",
+            disabled_tip: "",
+            undo: self.undo_offer(ResetKind::Customisations),
+        };
+        if ui.horizontal(|ui| reset_button(ui, &self.pal, &c)).inner {
+            self.reset_or_undo(ResetKind::Customisations);
+        }
     }
 
     fn tab_sensors(&mut self, ui: &mut Ui) {
@@ -451,22 +444,16 @@ impl App {
         );
         ui.add_space(8.0);
         let can_reset = !l.auto || !l.section_order.is_empty() || !l.reading_order.is_empty();
-        let order = format!("the custom order of {} sections and {} readings", l.section_order.len(), l.reading_order.len());
-        let armed_label = if l.auto { format!("Click again to clear {order}") } else { format!("Click again to clear your {} columns and {order}", l.columns.len()) };
-        let armed = self.is_armed(ResetKind::LayoutAuto);
-        let c = Confirm {
+        let c = ResetButton {
             enabled: can_reset,
             label: "Reset to automatic",
-            armed_label: &armed_label,
-            tip: "Back to the automatic arrangement. Asks again before it does.",
+            tip: "Back to the automatic arrangement: clears your columns and the order of sections and readings.",
             disabled_tip: "",
-            rtl: false,
+            undo: self.undo_offer(ResetKind::Layout),
         };
-        ui.horizontal_wrapped(|ui| {
-            if let Some(step) = confirm_button(ui, &self.pal, armed, &c) {
-                self.reset_step(ResetKind::LayoutAuto, step);
-            }
-        });
+        if ui.horizontal_wrapped(|ui| reset_button(ui, &self.pal, &c)).inner {
+            self.reset_or_undo(ResetKind::Layout);
+        }
         ui.label(RichText::new("Collapsed panels and sections are kept.").color(self.pal.ink3));
     }
 
@@ -509,20 +496,16 @@ impl App {
                 ui.end_row();
             }
         });
-        let armed = self.is_armed(ResetKind::ProcViews);
-        let c = Confirm {
+        let c = ResetButton {
             enabled: true,
             label: "Reset views",
-            armed_label: "Click again to reset the sizes, columns and Name widths of all four views",
-            tip: "Back to the default sizes, columns and Name widths of all four views. Asks again before it does.",
+            tip: "Back to the default sizes, columns and Name widths of all four views.",
             disabled_tip: "",
-            rtl: false,
+            undo: self.undo_offer(ResetKind::ProcViews),
         };
-        ui.horizontal_wrapped(|ui| {
-            if let Some(step) = confirm_button(ui, &self.pal, armed, &c) {
-                self.reset_step(ResetKind::ProcViews, step);
-            }
-        });
+        if ui.horizontal_wrapped(|ui| reset_button(ui, &self.pal, &c)).inner {
+            self.reset_or_undo(ResetKind::ProcViews);
+        }
         ui.add_space(8.0);
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {

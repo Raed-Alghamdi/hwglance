@@ -1,4 +1,4 @@
-//! Application state, top bar, status bar, shortcuts, the two-step resets, the kill confirmation
+//! Application state, top bar, status bar, shortcuts, the resets and their Undo, the kill confirmation
 //! and the check that follows a kill.
 
 use crate::a11y::{self, Ring, Spoken};
@@ -14,7 +14,7 @@ use crate::history::{self, PopInput};
 use crate::system_theme::{self, SystemLight};
 use crate::theme::{self, base, fs, Palette, ThemeChoice};
 use crate::winctl;
-use crate::ui_kit::{self, confirm_button, f_label, f_label_bold, f_small, f_title, icon, Confirm, ConfirmStep, Device};
+use crate::ui_kit::{self, f_label, f_label_bold, f_small, f_title, icon, Device, ResetButton, UndoOffer};
 use crate::sensors::{self, DeviceState, Hit, ViewOut};
 use crate::thresholds::{Pending, ThrEdit};
 use eframe::egui;
@@ -36,8 +36,8 @@ const SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
 /// clears in a second, and the banner has a button for an immediate retry).
 const SAVE_RETRY: Duration = Duration::from_secs(10);
 const HOVER_DELAY: Duration = Duration::from_millis(350);
-/// How long a reset stays armed, waiting for its second click.
-const ARMED_FOR: Duration = Duration::from_secs(8);
+/// How long a reset can be taken back. The collector keeps the cleared statistics for as long.
+pub const UNDO_FOR: Duration = Duration::from_secs(hwglance_proto::UNDO_RESET_WINDOW_S);
 /// How long after a kill the target's processes are checked.
 const KILL_CHECK_FOR: Duration = Duration::from_secs(3);
 /// How long the outcome stays in the action row (it also goes when the selection changes).
@@ -98,17 +98,39 @@ pub struct PendingKill {
     pub focus_set: bool,
 }
 
-/// The resets that ask twice. Only one is armed at a time.
+/// The resets. Each acts at once and is offered back as an Undo for [`UNDO_FOR`]; every kind has
+/// its own Undo.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResetKind {
-    /// The top bar's Reset and Ctrl+R: low, high, average, throttle history and finished crossings.
+    /// The top bar's Reset and Ctrl+R: low, high, average, throttle history and finished
+    /// crossings. The cleared state is kept by the collector.
     Stats,
-    /// The edit bar's Reset layout.
-    EditLayout,
-    /// Settings, Layout: Reset to automatic.
-    LayoutAuto,
+    /// The edit bar's Reset layout and Settings, Layout: Reset to automatic (one reset, two buttons).
+    Layout,
     /// Settings, Processes: Reset views.
     ProcViews,
+    /// Settings, General: Reset all customisations.
+    Customisations,
+}
+
+/// What a reset replaced, as the window keeps it for an Undo.
+#[derive(Clone, Debug)]
+pub enum Cleared {
+    /// The collector holds it (`ClientMsg::UndoResetStats`).
+    Stats,
+    Layout(settings::LayoutPrefs),
+    ProcViews(settings::ProcViews),
+    Customisations(Box<Settings>),
+}
+
+/// A reset that can still be taken back.
+#[derive(Clone, Debug)]
+pub struct UndoEntry {
+    pub kind: ResetKind,
+    pub at: Instant,
+    /// What comes back, as a phrase for the tooltip and the screen reader.
+    pub what: String,
+    pub cleared: Cleared,
 }
 
 /// What follows ending a task: the target's processes are checked for a few seconds and the
@@ -288,8 +310,8 @@ pub struct App {
     pub icons: IconCache,
 
     pub pending_kill: Option<PendingKill>,
-    /// The reset waiting for its second click, and since when.
-    pub armed: Option<(ResetKind, Instant)>,
+    /// Resets that can still be taken back: at most one per kind, newest last.
+    pub undo: Vec<UndoEntry>,
     pub kill_watch: Option<KillWatch>,
     /// A text field had the keyboard when the last frame ended.
     typing_last: bool,
@@ -466,7 +488,7 @@ impl App {
             search_open: false,
             icons: IconCache::new(),
             pending_kill: None,
-            armed: None,
+            undo: Vec::new(),
             kill_watch: None,
             typing_last: false,
             alive_check: actions::is_running,
@@ -864,43 +886,114 @@ impl App {
     }
 
     // ------------------------------------------------------------------
-    // Two-step resets
+    // Resets and their Undo
     // ------------------------------------------------------------------
 
-    pub fn is_armed(&self, kind: ResetKind) -> bool {
-        self.armed.is_some_and(|(k, _)| k == kind)
+    /// The Undo on offer for a kind of reset, with the time left.
+    pub fn undo_offer(&self, kind: ResetKind) -> Option<UndoOffer<'_>> {
+        let e = self.undo.iter().find(|e| e.kind == kind)?;
+        let left = UNDO_FOR.checked_sub(e.at.elapsed()).filter(|d| !d.is_zero())?;
+        Some(UndoOffer { left, total: UNDO_FOR, what: &e.what })
     }
 
-    /// Act on a click of a two-step reset button.
-    pub fn reset_step(&mut self, kind: ResetKind, step: ConfirmStep) {
-        match step {
-            ConfirmStep::Arm => self.armed = Some((kind, Instant::now())),
-            ConfirmStep::Cancel => self.armed = None,
-            ConfirmStep::Confirm => {
-                self.armed = None;
-                match kind {
-                    ResetKind::Stats => self.reset_stats(),
-                    ResetKind::EditLayout | ResetKind::LayoutAuto => layout::reset(&mut self.s.layout),
-                    ResetKind::ProcViews => self.s.processes.views = settings::ProcViews::default(),
+    /// A click on a reset button: the Undo when one is on offer, else the reset.
+    pub fn reset_or_undo(&mut self, kind: ResetKind) {
+        if self.undo_offer(kind).is_some() {
+            self.undo_reset(kind);
+        } else {
+            self.reset(kind);
+        }
+    }
+
+    /// Reset at once and offer the way back. A newer reset of the same kind replaces the older
+    /// offer (and restarts the time): Undo always goes to the state before the latest reset.
+    pub fn reset(&mut self, kind: ResetKind) {
+        let (what, cleared) = match kind {
+            ResetKind::Stats => {
+                if self.snap.is_none() || !self.send_stats(&ClientMsg::ResetStats, "reset") {
+                    return;
                 }
+                (self.stats_reset_what(), Cleared::Stats)
+            }
+            ResetKind::Layout => {
+                let before = self.s.layout.clone();
+                layout::reset(&mut self.s.layout);
+                if self.s.layout == before {
+                    return;
+                }
+                ("your columns and the order of panels, sections and rows".to_string(), Cleared::Layout(before))
+            }
+            ResetKind::ProcViews => {
+                let before = self.s.processes.views.clone();
+                self.s.processes.views = settings::ProcViews::default();
+                if self.s.processes.views == before {
+                    return;
+                }
+                ("the sizes, columns and Name widths of all four process views".to_string(), Cleared::ProcViews(before))
+            }
+            ResetKind::Customisations => {
+                let before = self.s.clone();
+                self.s.reset_customisations();
+                self.rows_dirty = true;
+                self.force_resort = true;
+                if self.s == before {
+                    return;
+                }
+                (
+                    "your hidden, watched and collapsed values, layout, process, theme and font settings".to_string(),
+                    Cleared::Customisations(Box::new(before)),
+                )
+            }
+        };
+        self.undo.retain(|e| e.kind != kind);
+        self.undo.push(UndoEntry { kind, at: Instant::now(), what, cleared });
+    }
+
+    /// Put back what the latest reset of this kind cleared, if its time is not up.
+    pub fn undo_reset(&mut self, kind: ResetKind) {
+        let Some(i) = self.undo.iter().position(|e| e.kind == kind) else { return };
+        let e = self.undo.remove(i);
+        if e.at.elapsed() >= UNDO_FOR {
+            return;
+        }
+        match e.cleared {
+            Cleared::Stats => {
+                self.send_stats(&ClientMsg::UndoResetStats, "undo");
+            }
+            Cleared::Layout(saved) => layout::restore(&mut self.s.layout, saved),
+            Cleared::ProcViews(saved) => self.s.processes.views = saved,
+            Cleared::Customisations(saved) => {
+                self.s.restore_customisations(*saved);
+                self.rows_dirty = true;
+                self.force_resort = true;
             }
         }
     }
 
-    /// An armed reset goes when its button is no longer on screen or it has waited long enough,
-    /// so a click much later never lands on a question nobody remembers.
-    fn expire_armed(&mut self, ctx: &egui::Context) {
-        let Some((kind, at)) = self.armed else { return };
-        let on_screen = match kind {
-            ResetKind::Stats => self.snap.is_some(),
-            ResetKind::EditLayout => self.edit_layout,
-            ResetKind::LayoutAuto => self.settings_open && self.settings_tab == SettingsTab::Layout,
-            ResetKind::ProcViews => self.settings_open && self.settings_tab == SettingsTab::Processes,
+    /// Ctrl+Z: take back the most recent reset that can still be taken back.
+    pub fn undo_latest(&mut self) -> bool {
+        let Some(kind) = self.undo.iter().filter(|e| e.at.elapsed() < UNDO_FOR).max_by_key(|e| e.at).map(|e| e.kind) else {
+            return false;
         };
-        if !on_screen || at.elapsed() >= ARMED_FOR {
-            self.armed = None;
-        } else {
-            ctx.request_repaint_after(ARMED_FOR - at.elapsed() + Duration::from_millis(30));
+        self.undo_reset(kind);
+        true
+    }
+
+    /// Offers whose time is up go, and the screen is redrawn when the bar next steps (each whole
+    /// second) or an offer ends.
+    fn expire_undo(&mut self, ctx: &egui::Context) {
+        self.undo.retain(|e| e.at.elapsed() < UNDO_FOR);
+        let next = self
+            .undo
+            .iter()
+            .filter_map(|e| UNDO_FOR.checked_sub(e.at.elapsed()))
+            .map(|left| match left.subsec_nanos() {
+                0 => Duration::from_secs(1),
+                n => Duration::from_nanos(n as u64),
+            })
+            .min();
+        if let Some(wait) = next {
+            ctx.request_repaint_after(wait + Duration::from_millis(30));
         }
     }
 
@@ -990,9 +1083,9 @@ impl App {
     // ------------------------------------------------------------------
 
     fn handle_keys(&mut self, ctx: &egui::Context) {
-        // Font size works everywhere, even in the search box. Ctrl+R never resets on the spot: it
-        // arms the same confirm as the Reset button, and not at all while a text field has focus
-        // or a dialog is open.
+        // Font size works everywhere, even in the search box. Ctrl+R resets the statistics like the
+        // top bar's Reset (and Ctrl+Z takes the latest reset back), but not while a text field has
+        // focus or a dialog is open.
         // egui drops the focus of a text field at the start of the pass in which Esc arrives, so
         // "a field is being edited" also counts a field that had the keyboard a frame ago.
         // (`egui_wants_keyboard_input` is true for any focused widget, a button after Tab included;
@@ -1021,8 +1114,12 @@ impl App {
         } else if smaller {
             *fsz = (*fsz - 0.5).max(10.0);
         }
-        if ask_reset && self.snap.is_some() {
-            self.reset_step(ResetKind::Stats, ConfirmStep::Arm);
+        if ask_reset {
+            self.reset(ResetKind::Stats);
+        }
+        // Ctrl+Z takes back the latest reset, unless a text field has it for its own undo.
+        if !editing && !self.undo.is_empty() && ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Z)) {
+            self.undo_latest();
         }
 
         // Modal confirmation: Esc cancels. Cancel has the focus when the dialog opens, for a force
@@ -1033,12 +1130,6 @@ impl App {
             if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
                 self.pending_kill = None;
             }
-            return;
-        }
-
-        // Esc drops an armed reset.
-        if self.armed.is_some() && !editing && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
-            self.armed = None;
             return;
         }
 
@@ -1285,12 +1376,14 @@ impl App {
         self.limits_error_seen = now;
     }
 
-    pub fn reset_stats(&mut self) {
-        if self.link.send(&ClientMsg::ResetStats) {
-            self.set_toast("Min, max and average reset".into(), true);
-        } else if matches!(self.mode, Mode::Live) {
-            self.set_toast("Collector not connected, cannot reset".into(), false);
+    /// Send a reset or its undo to the collector (or the demo generator). False, with a note, when
+    /// the collector cannot be reached.
+    fn send_stats(&mut self, msg: &ClientMsg, what: &str) -> bool {
+        if self.link.send(msg) || !matches!(self.mode, Mode::Live) {
+            return true;
         }
+        self.set_toast(format!("Collector not connected, cannot {what}"), false);
+        false
     }
 
     // ------------------------------------------------------------------
@@ -1326,7 +1419,7 @@ impl App {
         self.settings_window(&ctx);
         self.kill_modal(&ctx);
         self.tick_kill_watch(&ctx);
-        self.expire_armed(&ctx);
+        self.expire_undo(&ctx);
         self.settings_tick(&ctx);
         self.typing_last = ctx.text_edit_focused();
         self.schedule_repaints(&ctx, stale);
@@ -1596,7 +1689,7 @@ impl App {
         let hover_device = self.hover_device;
         // hovering a row opens the popover (and not the tooltip) unless editing or a dialog is up
         let popover = !edit && self.pending_kill.is_none();
-        let reset_armed = self.is_armed(ResetKind::EditLayout);
+        let layout_undo = self.undo_offer(ResetKind::Layout).map(|o| (o.left, o.what.to_string()));
         let mut out = ViewOut::default();
         ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
             ui.set_clip_rect(rect.intersect(ui.clip_rect()));
@@ -1614,7 +1707,7 @@ impl App {
                     flash: flash.as_ref().map(|(id, age)| (id.as_str(), *age)),
                     pinned: pinned.as_deref(),
                     popover,
-                    reset_armed,
+                    layout_undo: layout_undo.as_ref().map(|(left, what)| UndoOffer { left: *left, total: UNDO_FOR, what }),
                     nav: &mut self.nav,
                     pending: &self.thr_pending,
                     out: &mut out,
@@ -1628,8 +1721,8 @@ impl App {
         if out.stop_editing {
             self.edit_layout = false;
         }
-        if let Some(step) = out.reset_layout {
-            self.reset_step(ResetKind::EditLayout, step);
+        if out.reset_layout {
+            self.reset_or_undo(ResetKind::Layout);
         }
         self.scroll_to_reading = scroll_to;
         self.scroll_to_card = scroll_to_card;
@@ -1834,7 +1927,7 @@ impl App {
                 // Fit the bar to its width before anything can overlap: first the "Since" text
                 // goes, then the Sources chip shrinks to its dot, then the legend names shorten
                 // and finally become dots (their names stay in the tooltips).
-                let (density, widths) = {
+                let density = {
                     let measure = |text: &str, font: FontId| ui.painter().layout_no_wrap(text.to_string(), font, pal.ink2).size().x;
                     let pad = 2.0 * ui.spacing().button_padding.x;
                     let space = ui.spacing().item_spacing.x;
@@ -1865,18 +1958,7 @@ impl App {
                         sources: sources.map(|w| [w, sources_chip_width(0.0, SourcesForm::Dot) + space]),
                         since: self.snap.as_ref().map(|s| measure(&format!("Since {}", ui_kit::fmt_clock(s.stats_since_unix_ms)), f_label()) + space),
                     };
-                    (bar_density(ui.available_width(), &widths), widths)
-                };
-                // room for the Reset button's long question: what is left of the bar after the
-                // legend side and the other right-hand parts (measured above)
-                let reset_room = {
-                    let sources = widths.sources.map_or(0.0, |s| s[if density.sources() == SourcesForm::Text { 0 } else { 1 }]);
-                    let left = widths.left[match density.legend() {
-                        LegendForm::Full => 0,
-                        LegendForm::Short => 1,
-                        LegendForm::Dot => 2,
-                    }];
-                    ui.available_width() - left - widths.right_fixed - sources - 120.0
+                    bar_density(ui.available_width(), &widths)
                 };
                 // A double-click on an empty part of the bar maximizes or restores, as on a title
                 // bar. It is made first, so every control drawn over it wins its own clicks, and
@@ -1924,21 +2006,16 @@ impl App {
                             ui.label(RichText::new(format!("Since {}", ui_kit::fmt_clock(s.stats_since_unix_ms))).color(pal.ink3));
                         }
                         let what = self.stats_reset_what();
-                        let armed = self.is_armed(ResetKind::Stats);
-                        // The question names what goes; a narrow bar keeps the short form
-                        // (the long one is in the tooltip).
-                        let long = format!("Click again to clear {what}");
-                        let wide = ui.painter().layout_no_wrap(long.clone(), f_label(), pal.crit).size().x + 24.0 < reset_room;
-                        let c = Confirm {
+                        let tip = format!("Clear {what} (Ctrl+R).");
+                        let c = ResetButton {
                             enabled: self.snap.is_some(),
                             label: "Reset",
-                            armed_label: if wide { &long } else { "Click again to clear history" },
-                            tip: &format!("Clear {what} (Ctrl+R). Asks again before it does."),
+                            tip: &tip,
                             disabled_tip: "Nothing to reset until the collector sends data",
-                            rtl: false,
+                            undo: self.undo_offer(ResetKind::Stats),
                         };
-                        if let Some(step) = confirm_button(ui, &pal, armed, &c) {
-                            self.reset_step(ResetKind::Stats, step);
+                        if ui_kit::reset_button(ui, &pal, &c) {
+                            self.reset_or_undo(ResetKind::Stats);
                         }
                         ui.add_space(8.0);
                         if stale {

@@ -266,6 +266,15 @@ pub fn reset(prefs: &mut LayoutPrefs) {
     prefs.reading_order.clear();
 }
 
+/// Put back what [`reset`] cleared, from the preferences as they were before it. Everything else
+/// (collapsed panels, the dock and its sizes) stays as it is now.
+pub fn restore(prefs: &mut LayoutPrefs, saved: LayoutPrefs) {
+    prefs.auto = saved.auto;
+    prefs.columns = saved.columns;
+    prefs.section_order = saved.section_order;
+    prefs.reading_order = saved.reading_order;
+}
+
 /// Apply a saved order to `default` ids: saved ids that still exist come first in the saved
 /// order, then the rest in default order.
 pub fn apply_order(default: &[String], saved: Option<&Vec<String>>) -> Vec<String> {

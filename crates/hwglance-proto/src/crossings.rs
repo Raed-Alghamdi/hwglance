@@ -97,6 +97,21 @@ impl Tracker {
         self.list.retain(|c| c.end_ms.is_none());
     }
 
+    /// Put back crossings that `clear_closed` dropped (an undone reset). What was recorded since
+    /// is kept: a crossing that was still going is the same one in both lists, and the newer
+    /// record of it wins. Oldest first, as before.
+    pub fn absorb_earlier(&mut self, earlier: Vec<Crossing>) {
+        let mut merged = earlier;
+        for c in self.list.drain(..) {
+            match merged.iter_mut().find(|e| e.id == c.id && e.start_ms == c.start_ms) {
+                Some(e) => *e = c,
+                None => merged.push(c),
+            }
+        }
+        merged.sort_by_key(|c| c.start_ms);
+        self.list = merged;
+    }
+
     pub fn list(&self) -> &[Crossing] {
         &self.list
     }
@@ -192,6 +207,22 @@ mod tests {
         t.prune((MAX_KEPT as u64 + 20) * 100 * S);
         assert_eq!(t.list().len(), MAX_KEPT);
         assert_eq!(t.list()[0].id, "r20", "the oldest went first");
+    }
+
+    #[test]
+    fn an_undone_reset_puts_the_closed_crossings_back_beside_the_new_ones() {
+        let mut t = Tracker::new();
+        feed(&mut t, 0, 85.0);
+        feed(&mut t, S, 70.0);
+        t.observe(2 * S, "gpu0/temp/core", 90.0, Some(80.0), Some(88.0), false);
+        let before = t.list().to_vec();
+        t.clear_closed();
+        // after the reset: the open one goes on, a new one starts
+        t.observe(3 * S, "gpu0/temp/core", 92.0, Some(80.0), Some(88.0), false);
+        feed(&mut t, 4 * S, 86.0);
+        t.absorb_earlier(before);
+        let ids: Vec<_> = t.list().iter().map(|c| (c.id.as_str(), c.start_ms, c.peak)).collect();
+        assert_eq!(ids, [("cpu/temp/tctl", 0, 85.0), ("gpu0/temp/core", 2 * S, 92.0), ("cpu/temp/tctl", 4 * S, 86.0)]);
     }
 
     #[test]

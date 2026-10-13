@@ -478,6 +478,14 @@ impl Settings {
         *self = Settings { tray, alerts, ..Settings::default() };
     }
 
+    /// Take back [`Settings::reset_customisations`]: `saved` is the state before it. The bar widget
+    /// and alert choices are the current ones, as the reset kept them.
+    pub fn restore_customisations(&mut self, saved: Settings) {
+        let tray = std::mem::take(&mut self.tray);
+        let alerts = std::mem::take(&mut self.alerts);
+        *self = Settings { tray, alerts, ..saved };
+    }
+
     pub fn is_highlighted(&self, id: &str) -> bool {
         self.sensors.highlighted.iter().any(|h| h == id)
     }

@@ -1,7 +1,7 @@
 //! Synthetic, slowly changing snapshots that look like the real PC (`hwglance --demo`).
 
 use hwglance_proto::{
-    crossings::Tracker, ClientMsg, FlagEvents, HistorySeries, LimitOverride, ProcClass, ProcGroup, ProcInfo, Reading, Section, SensorGroup, Snapshot, SourceStatus, Stats,
+    crossings::Tracker, ClientMsg, Crossing, FlagEvents, HistorySeries, LimitOverride, ProcClass, ProcGroup, ProcInfo, Reading, Section, SensorGroup, Snapshot, SourceStatus, Stats,
     Summary, Unit, PROTO_VERSION,
 };
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -16,6 +16,14 @@ struct FlagState {
     count: u32,
     last_ms: u64,
     ended_ms: u64,
+}
+
+/// The statistics a reset cleared: flag counts as (count, last, ended).
+struct DemoBackup {
+    stats: HashMap<String, Stats>,
+    since_ms: u64,
+    flags: HashMap<String, (u32, u64, u64)>,
+    crossings: Vec<Crossing>,
 }
 
 /// Throttling that sometimes turns on, on a fixed schedule so the demo is repeatable.
@@ -38,6 +46,8 @@ pub struct Demo {
     start_unix_ms: u64,
     cur_ms: u64,
     flags: HashMap<String, FlagState>,
+    /// What the latest reset cleared, for an undo.
+    undo: Option<Box<DemoBackup>>,
     history: HashMap<String, (Unit, VecDeque<(u64, f32)>)>,
     /// Threshold crossings, recorded by the collector's own rules.
     crossings: Tracker,
@@ -204,6 +214,7 @@ impl Demo {
             start_unix_ms: start,
             cur_ms: start,
             flags: HashMap::new(),
+            undo: None,
             history: HashMap::new(),
             crossings: Tracker::new(),
             limits: HashMap::new(),
@@ -225,6 +236,12 @@ impl Demo {
     }
 
     pub fn reset_stats(&mut self) {
+        self.undo = Some(Box::new(DemoBackup {
+            stats: self.stats.clone(),
+            since_ms: self.since_ms,
+            flags: self.flags.iter().map(|(id, f)| (id.clone(), (f.count, f.last_ms, f.ended_ms))).collect(),
+            crossings: self.crossings.list().to_vec(),
+        }));
         self.stats.clear();
         self.since_ms = self.cur_ms;
         for f in self.flags.values_mut() {
@@ -233,6 +250,31 @@ impl Demo {
             f.ended_ms = 0;
         }
         self.crossings.clear_closed();
+    }
+
+    /// Take back the latest reset, as the collector does (the window enforces the 30 seconds).
+    pub fn undo_reset_stats(&mut self) {
+        let Some(b) = self.undo.take() else { return };
+        for (id, earlier) in &b.stats {
+            match self.stats.get_mut(id) {
+                Some(now) => now.absorb_earlier(earlier),
+                None => {
+                    self.stats.insert(id.clone(), *earlier);
+                }
+            }
+        }
+        for (id, (count, last_ms, ended_ms)) in &b.flags {
+            if let Some(f) = self.flags.get_mut(id) {
+                let later = f.count > 0 || f.last_ms > 0;
+                if !later {
+                    f.last_ms = *last_ms;
+                    f.ended_ms = *ended_ms;
+                }
+                f.count += count;
+            }
+        }
+        self.crossings.absorb_earlier(b.crossings);
+        self.since_ms = b.since_ms;
     }
 
     /// Run the clock from `from` to `to` (demo seconds) to build up history and flag events.
@@ -947,8 +989,11 @@ pub fn spawn(ctx: egui::Context, link: crate::conn::Link) {
             demo.warm_up(T_START - HISTORY_S, T_START, 5.0);
             let t0 = std::time::Instant::now();
             loop {
-                if link.take_demo_reset() {
-                    demo.reset_stats();
+                for msg in link.take_demo_stats() {
+                    match msg {
+                        ClientMsg::ResetStats => demo.reset_stats(),
+                        _ => demo.undo_reset_stats(),
+                    }
                 }
                 for msg in link.take_demo_limits() {
                     demo.apply_limit_request(&msg);
@@ -1060,5 +1105,10 @@ mod tests {
         d.reset_stats();
         let s = d.snapshot(41.0);
         assert_eq!(s.sensors[0].sections[0].readings[0].stats.unwrap().samples, 1);
+        // an undo brings the earlier samples back beside the new one
+        d.undo_reset_stats();
+        let s = d.snapshot(42.0);
+        let r = &s.sensors[0].sections[0].readings[0];
+        assert!(r.stats.unwrap().samples >= 8, "{:?}", r.stats);
     }
 }
