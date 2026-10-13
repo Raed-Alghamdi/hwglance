@@ -63,6 +63,8 @@ build() {
   cd "$pkgname-$pkgver"
   export RUSTUP_TOOLCHAIN=stable
   export CARGO_TARGET_DIR=target
+  # Generated sources (the GL bindings) leave their build paths in panic messages.
+  export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$srcdir=src"
   cargo build --frozen --release --workspace
 }
 
