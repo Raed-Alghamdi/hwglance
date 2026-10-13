@@ -25,7 +25,7 @@ fn setup() {
     // SAFETY: runs before any harness of this test is built.
     unsafe {
         std::env::set_var("TZ", "UTC");
-        std::env::set_var("HWGLANCE_ICON_DIRS", "/nonexistent-hwglance-icons");
+        std::env::set_var("HWGLANCE_ICON_DIRS", concat!(env!("CARGO_MANIFEST_DIR"), "/tests/assets/icons"));
         tzset();
     }
 }

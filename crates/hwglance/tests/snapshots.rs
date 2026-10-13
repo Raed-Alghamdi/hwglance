@@ -37,7 +37,7 @@ fn setup() {
         // SAFETY: runs once before any test of this binary builds a harness or reads these.
         unsafe {
             std::env::set_var("TZ", "UTC");
-            std::env::set_var("HWGLANCE_ICON_DIRS", "/nonexistent-hwglance-icons");
+            std::env::set_var("HWGLANCE_ICON_DIRS", concat!(env!("CARGO_MANIFEST_DIR"), "/tests/assets/icons"));
             tzset();
         }
     });

@@ -2,8 +2,8 @@
 //! Optional polish: everything falls back to a coloured first-letter badge.
 //!
 //! Lookup order: the icon name in the current theme (Yaru-magenta, then its parent Yaru),
-//! then hicolor, then /usr/share/pixmaps. PNGs of 32 to 48 px are preferred; SVGs load through
-//! egui_extras' svg loader. Names and misses are cached so the file system is hit once per name.
+//! then hicolor, then /usr/share/pixmaps (not when `HWGLANCE_ICON_DIRS` names the roots). PNGs
+//! of 32 to 48 px are preferred; SVGs load through egui_extras' svg loader. Names and misses are cached so the file system is hit once per name.
 
 use egui::{Context, TextureId};
 use std::collections::HashMap;
@@ -18,6 +18,8 @@ pub struct IconCache {
     /// Tone of each loaded icon, measured once from its pixels.
     tones: HashMap<String, Tone>,
     roots: Vec<PathBuf>,
+    /// Whether /usr/share/pixmaps is searched after the themes.
+    pixmaps: bool,
 }
 
 /// How an icon sits against a row. Most app icons carry their own background, but a light or
@@ -51,22 +53,27 @@ pub fn tone_of(img: &egui::ColorImage) -> Tone {
     }
 }
 
-fn user_icon_roots() -> Vec<PathBuf> {
-    // `HWGLANCE_ICON_DIRS` (colon separated) replaces the search roots, so renders do not
-    // depend on the installed icon themes (golden-image tests).
-    if let Some(dirs) = std::env::var_os("HWGLANCE_ICON_DIRS") {
-        return std::env::split_paths(&dirs).collect();
+fn user_icon_roots() -> (Vec<PathBuf>, bool) {
+    icon_roots(std::env::var_os("HWGLANCE_ICON_DIRS"))
+}
+
+/// Search roots and whether /usr/share/pixmaps is searched too. `HWGLANCE_ICON_DIRS` (colon
+/// separated) replaces both, so renders depend on neither the installed icon themes nor
+/// /usr/share/pixmaps (golden-image tests).
+fn icon_roots(dirs: Option<std::ffi::OsString>) -> (Vec<PathBuf>, bool) {
+    if let Some(dirs) = dirs {
+        return (std::env::split_paths(&dirs).collect(), false);
     }
     let mut v = Vec::new();
     if let Some(home) = std::env::var_os("HOME") {
         v.push(Path::new(&home).join(".local/share/icons"));
     }
     v.push(PathBuf::from("/usr/share/icons"));
-    v
+    (v, true)
 }
 
 /// Find an icon file for `name` (a theme icon name or an absolute path).
-pub fn find_icon(roots: &[PathBuf], name: &str) -> Option<PathBuf> {
+pub fn find_icon(roots: &[PathBuf], pixmaps: bool, name: &str) -> Option<PathBuf> {
     if name.starts_with('/') {
         let p = PathBuf::from(name);
         let ok = p.extension().is_some_and(|e| e == "png" || e == "svg");
@@ -101,10 +108,12 @@ pub fn find_icon(roots: &[PathBuf], name: &str) -> Option<PathBuf> {
             }
         }
     }
-    for ext in ["png", "svg"] {
-        let p = Path::new("/usr/share/pixmaps").join(format!("{name}.{ext}"));
-        if p.is_file() {
-            return Some(p);
+    if pixmaps {
+        for ext in ["png", "svg"] {
+            let p = Path::new("/usr/share/pixmaps").join(format!("{name}.{ext}"));
+            if p.is_file() {
+                return Some(p);
+            }
         }
     }
     None
@@ -112,16 +121,17 @@ pub fn find_icon(roots: &[PathBuf], name: &str) -> Option<PathBuf> {
 
 impl IconCache {
     pub fn new() -> Self {
-        IconCache { resolved: HashMap::new(), tones: HashMap::new(), roots: user_icon_roots() }
+        let (roots, pixmaps) = user_icon_roots();
+        IconCache { resolved: HashMap::new(), tones: HashMap::new(), roots, pixmaps }
     }
 
     /// Texture and tone for `name` when the icon exists and has finished loading.
     pub fn get(&mut self, ctx: &Context, name: &str) -> Option<(TextureId, Tone)> {
-        let roots = &self.roots;
+        let (roots, pixmaps) = (&self.roots, self.pixmaps);
         let uri = self
             .resolved
             .entry(name.to_string())
-            .or_insert_with(|| find_icon(roots, name).map(|p| format!("file://{}", p.display())))
+            .or_insert_with(|| find_icon(roots, pixmaps, name).map(|p| format!("file://{}", p.display())))
             .clone()?;
         let hint = egui::load::SizeHint::Size { width: 48, height: 48, maintain_aspect_ratio: true };
         match ctx.try_load_texture(&uri, egui::TextureOptions::LINEAR, hint) {
@@ -160,11 +170,11 @@ mod tests {
 
     #[test]
     fn absolute_and_bad_names() {
-        let roots = user_icon_roots();
-        assert!(find_icon(&roots, "").is_none());
-        assert!(find_icon(&roots, "../etc/passwd").is_none());
-        assert!(find_icon(&roots, "/etc/passwd").is_none());
-        assert!(find_icon(&roots, "definitely-not-an-icon-name-xyz").is_none());
+        let (roots, pixmaps) = user_icon_roots();
+        assert!(find_icon(&roots, pixmaps, "").is_none());
+        assert!(find_icon(&roots, pixmaps, "../etc/passwd").is_none());
+        assert!(find_icon(&roots, pixmaps, "/etc/passwd").is_none());
+        assert!(find_icon(&roots, pixmaps, "definitely-not-an-icon-name-xyz").is_none());
     }
 
     #[test]
@@ -192,7 +202,26 @@ mod tests {
     #[test]
     fn finds_a_theme_icon_when_installed() {
         if Path::new("/usr/share/icons/Yaru-magenta").is_dir() {
-            assert!(find_icon(&user_icon_roots(), "utilities-system-monitor").is_some());
+            let (roots, pixmaps) = user_icon_roots();
+            assert!(find_icon(&roots, pixmaps, "utilities-system-monitor").is_some());
+        }
+    }
+
+    #[test]
+    fn icon_dirs_variable_replaces_roots_and_pixmaps() {
+        let (roots, pixmaps) = icon_roots(Some("/a:/b".into()));
+        assert_eq!(roots, [PathBuf::from("/a"), PathBuf::from("/b")]);
+        assert!(!pixmaps);
+        let (roots, pixmaps) = icon_roots(None);
+        assert!(pixmaps && roots.contains(&PathBuf::from("/usr/share/icons")));
+        // A pixmaps icon is found by default and never when only the given roots count.
+        let found = std::fs::read_dir("/usr/share/pixmaps").ok().and_then(|d| {
+            d.flatten().map(|e| e.path()).find(|p| p.extension().is_some_and(|e| e == "png" || e == "svg"))
+        });
+        if let Some(stem) = found.as_ref().and_then(|p| p.file_stem()).and_then(|s| s.to_str()) {
+            let none = [PathBuf::from("/nonexistent-hwglance-icons")];
+            assert!(find_icon(&none, true, stem).is_some());
+            assert!(find_icon(&none, false, stem).is_none());
         }
     }
 }
