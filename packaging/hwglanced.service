@@ -5,7 +5,7 @@ After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/hwglanced
+ExecStart=/usr/bin/hwglanced
 Restart=on-failure
 RestartSec=2
 # Sampling must never compete with a game or a build for the CPU.

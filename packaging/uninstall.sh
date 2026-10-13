@@ -5,6 +5,7 @@
 # ${SUDO:-sudo}, for example SUDO=doas packaging/uninstall.sh.
 set -euo pipefail
 
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN="$HOME/.local/bin"
 APPS="$HOME/.local/share/applications"
 ICONS="$HOME/.local/share/icons/hicolor/scalable/apps"
@@ -60,8 +61,7 @@ if [[ -f "$ICONS/hwglance.svg" ]]; then
 fi
 
 if [[ -d $PLUGIN_DST ]]; then
-    command -v omarchy >/dev/null && omarchy plugin disable "$PLUGIN_ID" >/dev/null 2>&1 || true
-    rm -rf "$PLUGIN_DST"
+    "$HERE/hwglance-bar-widget" remove >/dev/null
     say "disabled and removed the Omarchy bar widget $PLUGIN_ID"
 fi
 

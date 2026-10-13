@@ -1,0 +1,87 @@
+#!/bin/sh
+# Install, update or remove the HW Glance bar widget for the Omarchy desktop (current user).
+#   hwglance-bar-widget install | update | remove
+# Omarchy loads user plugins only from ~/.config/omarchy/plugins, which a package cannot write,
+# so the widget ships under /usr/share/hwglance (or in the release tarball) and this command
+# copies it there. It is copied, not symlinked, so `omarchy plugin update` (git checkouts only)
+# skips it. `install` also enables the widget; `update` refreshes files only, for use after an
+# upgrade. The Omarchy shell is restarted only when the files changed.
+set -eu
+
+PLUGIN_ID=raed.hwglance
+DST="$HOME/.config/omarchy/plugins/$PLUGIN_ID"
+
+usage() { sed -n '2,3p' "$0" | sed 's/^# \{0,1\}//'; }
+die() { echo "hwglance-bar-widget: $*" >&2; exit 1; }
+
+# Where the widget files come from: HWGLANCE_PLUGIN_SRC, a package (/usr/bin/../share), or a
+# source checkout or release tarball (packaging/../omarchy-plugin).
+here="$(cd "$(dirname "$0")" && pwd)"
+SRC=
+for dir in "${HWGLANCE_PLUGIN_SRC:-}" "$here/../share/hwglance/omarchy-plugin/$PLUGIN_ID" "$here/../omarchy-plugin/$PLUGIN_ID"; do
+    if [ -n "$dir" ] && [ -f "$dir/manifest.json" ]; then SRC="$dir"; break; fi
+done
+
+have_omarchy() { command -v omarchy-shell >/dev/null 2>&1 || [ -d /usr/share/omarchy ]; }
+shell_running() { command -v omarchy-shell >/dev/null 2>&1 && omarchy-shell shell ping >/dev/null 2>&1; }
+
+# Copy the widget into place. Sets changed=1 when the files differ from what was there.
+copy_widget() {
+    [ -n "$SRC" ] || die "the widget files were not found (looked in /usr/share/hwglance and next to this script)"
+    changed=1
+    if [ -d "$DST" ] && diff -rq "$SRC" "$DST" >/dev/null 2>&1; then changed=0; fi
+    if [ "$changed" -eq 1 ]; then
+        rm -rf "$DST"
+        mkdir -p "$(dirname "$DST")"
+        cp -R "$SRC" "$DST"
+    fi
+    command -v omarchy-shell >/dev/null 2>&1 && omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
+}
+
+# The shell's hot reload keeps serving its cached copy of changed widget QML, so a running
+# shell needs a restart to show a new version (notification history is saved and survives it).
+restart_if_changed() {
+    if [ "$changed" -eq 1 ] && shell_running; then
+        omarchy restart shell >/dev/null 2>&1 || true
+        echo "Copied the bar widget to $DST and restarted the Omarchy shell."
+    elif [ "$changed" -eq 1 ]; then
+        echo "Copied the bar widget to $DST (the Omarchy shell is not running; it loads the widget at next start)."
+    else
+        echo "The bar widget at $DST is already current."
+    fi
+}
+
+is_enabled() { omarchy plugin list 2>/dev/null | grep -Eq "^$PLUGIN_ID[[:space:]]+enabled"; }
+
+case "${1:-}" in
+    install)
+        have_omarchy || die "Omarchy not found. The bar widget is for the Omarchy desktop."
+        copy_widget
+        restart_if_changed
+        if command -v omarchy >/dev/null 2>&1 && ! is_enabled; then
+            omarchy plugin enable "$PLUGIN_ID" \
+                || echo "Could not enable the widget now. Run: omarchy plugin enable $PLUGIN_ID"
+        fi
+        ;;
+    update)
+        have_omarchy || die "Omarchy not found. The bar widget is for the Omarchy desktop."
+        if [ ! -d "$DST" ]; then
+            echo "The bar widget is not installed for this user. Run: hwglance-bar-widget install"
+            exit 0
+        fi
+        copy_widget
+        restart_if_changed
+        ;;
+    remove)
+        if [ -d "$DST" ]; then
+            command -v omarchy >/dev/null 2>&1 && omarchy plugin disable "$PLUGIN_ID" >/dev/null 2>&1 || true
+            rm -rf "$DST"
+            command -v omarchy-shell >/dev/null 2>&1 && omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
+            echo "Disabled and removed the bar widget $PLUGIN_ID."
+        else
+            echo "The bar widget is not installed for this user."
+        fi
+        ;;
+    -h|--help|help) usage ;;
+    *) usage >&2; exit 2 ;;
+esac
