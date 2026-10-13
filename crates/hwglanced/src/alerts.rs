@@ -267,19 +267,36 @@ fn focus_id_ok(id: &str) -> bool {
     !id.is_empty() && id.len() <= 200 && id.chars().all(|c| c.is_ascii_alphanumeric() || "/_.:-".contains(c))
 }
 
+/// The window binary to launch: the `hwglance` that sits next to this executable (a per-user
+/// install in `~/.local/bin` and a package in `/usr/bin` both keep the two together), else
+/// `hwglance` from `PATH`.
+fn window_binary() -> String {
+    let beside = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("hwglance")))
+        .filter(|path| path.is_file());
+    match beside {
+        Some(path) => shell_word(&path.to_string_lossy()),
+        None => "hwglance".to_string(),
+    }
+}
+
+/// One word for a shell command line: plain paths as they are, anything else in single quotes.
+fn shell_word(s: &str) -> String {
+    if !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || "/_.-+:@%".contains(c)) {
+        s.to_string()
+    } else {
+        format!("'{}'", s.replace('\'', "'\\''"))
+    }
+}
+
 /// Focus the window on a reading: an open window is raised, otherwise one is launched
 /// (`hwglance --focus <id>` jumps to the reading either way through the Focus message).
 pub fn launch_or_focus(id: &str) {
     if !focus_id_ok(id) {
         return;
     }
-    let Some(home) = std::env::var_os("HOME") else {
-        return;
-    };
-    let cmd = format!(
-        "{}/.local/bin/hwglance --focus {id}",
-        home.to_string_lossy()
-    );
+    let cmd = format!("{} --focus {id}", window_binary());
     let _ = Command::new("omarchy-launch-or-focus")
         .args(["hwglance", &cmd])
         .stdin(Stdio::null())
@@ -292,6 +309,14 @@ pub fn launch_or_focus(id: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shell_word_quotes_only_when_needed() {
+        assert_eq!(shell_word("/usr/bin/hwglance"), "/usr/bin/hwglance");
+        assert_eq!(shell_word("/home/a b/hwglance"), "'/home/a b/hwglance'");
+        assert_eq!(shell_word("/home/o'neil/hwglance"), "'/home/o'\\''neil/hwglance'");
+        assert_eq!(shell_word(""), "''");
+    }
 
     fn cfg() -> AlertSettings {
         AlertSettings {

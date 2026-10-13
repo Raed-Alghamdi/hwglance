@@ -25,8 +25,10 @@ Panel {
 
   readonly property var config: ui.config
   readonly property var cards: Model.buildCards(config.popupValues)
-  readonly property string openCommand: "omarchy-launch-or-focus hwglance \"$HOME/.local/bin/hwglance\""
-  readonly property string settingsCommand: "$HOME/.local/bin/hwglance --settings"
+  // The window binary: hwglance from PATH (a package install), else the per-user install.
+  readonly property string windowBinary: "\"$(command -v hwglance || echo \"$HOME/.local/bin/hwglance\")\""
+  readonly property string openCommand: "omarchy-launch-or-focus hwglance " + windowBinary
+  readonly property string settingsCommand: windowBinary + " --settings"
 
   function openApp() {
     if (root.bar) root.bar.run(openCommand)
