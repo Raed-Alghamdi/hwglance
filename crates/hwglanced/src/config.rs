@@ -15,6 +15,7 @@ struct Raw {
     interval_ms: Option<u64>,
     slow_interval_ms: Option<u64>,
     cpu_thermal_limit_c: Option<f64>,
+    text_readouts: Option<bool>,
     #[serde(default)]
     labels: HashMap<String, String>,
     #[serde(default)]
@@ -27,6 +28,8 @@ pub struct Config {
     /// Temperature at which the CPU lowers its clocks; `None` takes the limit the hardware
     /// reports, else AMD's published figure for the model, else 95.
     pub cpu_thermal_limit_c: Option<f64>,
+    /// Write the plain-text readouts (`textexport`) every sample. Off unless asked for.
+    pub text_readouts: bool,
     /// `chip/sensor` -> display label.
     pub labels: HashMap<String, String>,
     pub hide: HashSet<String>,
@@ -60,6 +63,7 @@ impl Config {
             cpu_thermal_limit_c: raw
                 .cpu_thermal_limit_c
                 .filter(|c| (40.0..=120.0).contains(c)),
+            text_readouts: raw.text_readouts.unwrap_or(false),
             labels: raw.labels,
             hide: raw.hide.ids.into_iter().collect(),
         }
@@ -113,11 +117,20 @@ mod tests {
     }
 
     #[test]
+    fn text_readouts_default_off() {
+        let c = |s: &str| Config::from_raw(toml::from_str(s).unwrap()).text_readouts;
+        assert!(!c(""));
+        assert!(c("text_readouts = true"));
+        assert!(!c("text_readouts = false"));
+    }
+
+    #[test]
     fn example_config_parses() {
         let raw: Raw =
             toml::from_str(include_str!("../../../packaging/config.example.toml")).unwrap();
         let c = Config::from_raw(raw);
         assert_eq!(c.interval_ms, 1000);
+        assert!(!c.text_readouts);
         assert!(c.hide.is_empty());
     }
 }

@@ -54,7 +54,7 @@ fn command_output(cmd: &str, args: &[&str]) -> Option<String> {
 
 /// The font family Omarchy uses (`omarchy-font-current`), if it can be asked.
 pub fn omarchy_family() -> Option<String> {
-    // The Stream Deck toggle starts us with a minimal PATH, so also try Omarchy's install path.
+    // A launcher or key binding can start us with a minimal PATH, so also try Omarchy's install path.
     command_output("omarchy-font-current", &[])
         .or_else(|| command_output("/usr/share/omarchy/bin/omarchy-font-current", &[]))
 }

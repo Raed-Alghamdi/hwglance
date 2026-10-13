@@ -21,7 +21,7 @@ mod pci;
 mod procs;
 mod slow;
 mod steam;
-mod streamdeck;
+mod textexport;
 mod text;
 mod thresholds;
 mod uiprefs;
@@ -309,6 +309,7 @@ fn write_summary(s: &hwglance_proto::Summary) -> io::Result<()> {
 }
 
 fn run_daemon(cfg: Config) -> io::Result<()> {
+    let text_readouts = cfg.text_readouts;
     let dir = runtime_dir();
     fs::create_dir_all(&dir)?;
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))?;
@@ -362,8 +363,8 @@ fn run_daemon(cfg: Config) -> io::Result<()> {
         if let Err(e) = write_summary(&snap.summary) {
             eprintln!("hwglanced: cannot write summary: {e}");
         }
-        if let Err(e) = streamdeck::write(&snap.summary) {
-            eprintln!("hwglanced: cannot write Stream Deck texts: {e}");
+        if let Err(e) = textexport::update(text_readouts, &snap.summary) {
+            eprintln!("hwglanced: cannot write text readouts: {e}");
         }
         // A slim client that joined is owed a complete snapshot, and the flag stays until one has processes.
         let all_static = snap.procs.is_some()

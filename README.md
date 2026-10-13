@@ -1,6 +1,6 @@
 # HW Glance
 
-HW Glance is a hardware monitor for the Linux desktop. It puts every sensor your machine exposes (CPU, GPU, memory, drives, motherboard) and a Task Manager style process list in one window, laid out so a value can be found in about a second. A small background collector keeps min, max, average and a short history of every reading, and the window, an optional bar widget and optional Stream Deck keys all read from it.
+HW Glance is a hardware monitor for the Linux desktop. It puts every sensor your machine exposes (CPU, GPU, memory, drives, motherboard) and a Task Manager style process list in one window, laid out so a value can be found in about a second. A small background collector keeps min, max, average and a short history of every reading, and the window and an optional bar widget both read from it.
 
 ![HW Glance main window, dark theme](docs/screenshots/main-dark.png)
 
@@ -128,13 +128,6 @@ The warning and critical limits of every reading are kept in `~/.config/hwglance
 ### Omarchy bar widget
 
 [`omarchy-plugin/raed.hwglance`](omarchy-plugin/raed.hwglance) is a bar widget for the [Omarchy](https://omarchy.org) shell: an icon or live CPU and GPU usage in the bar, and a popup with key readings and the top processes. `packaging/install.sh` copies it into place on an Omarchy system; enable it once with `omarchy plugin enable raed.hwglance`. The plugin id is `author.name`, which is why it carries the author's handle. See its [README](omarchy-plugin/raed.hwglance/README.md).
-
-### Stream Deck
-
-[`streamdeck/`](streamdeck) has plain scripts for Stream Deck keys (any tool that can run a command on a key, such as StreamController or the Elgato software under a compatibility layer):
-
-- `sd-stat cpu|gpu|ram|ssd` prints two lines (a label and values) for a key. The collector writes the text for each key every second; `sd-stat` prints it, and falls back to `sd-stat-fallback` (Python) only when the file is missing or stale. Copy both files into the same directory.
-- `sd-monitor-toggle` opens or closes the window on a monitor (Hyprland only). Set `HWGLANCE_MONITOR` to a monitor name from `hyprctl monitors`; without it the focused monitor is used.
 
 ## Privacy and safety
 

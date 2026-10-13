@@ -20,6 +20,18 @@
 # ~/.config/hwglance/thresholds.json.
 # cpu_thermal_limit_c = 89
 
+# Plain-text readouts for status bars, scripts and macro keypads. When true, the collector
+# rewrites four small files after every fast sample (see interval_ms, 1 s by default) in
+# $XDG_RUNTIME_DIR/hwglance/text/ (a tmpfs, so nothing is kept across logins):
+#   cpu.txt   "CPU", then CPU temperature and usage, for example "55° 12%"
+#   gpu.txt   "GPU", then GPU temperature and usage, for example "62° 99%"
+#   ram.txt   "RAM", then memory in use, for example "41%"
+#   ssd.txt   "SSD", then the hottest drive, for example "40°C"
+# Each file holds two lines: the label, then the values. Files are replaced atomically, so a
+# reader never sees half of one. A readout whose values are unavailable has no file. With
+# false (or the key absent) nothing is written, and files an earlier run left are removed.
+# text_readouts = false
+
 # Display names for sensors, keyed "chip/sensor". To find the ids, run
 # `hwglanced --once --json` and look at the reading ids under "Motherboard": a fan with the
 # id "board/fan/nct6798/fan1" is the sensor "fan1" of the chip "nct6798", so its key is

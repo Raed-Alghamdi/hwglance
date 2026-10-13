@@ -22,13 +22,13 @@ Replace HWiNFO (sensors) and Windows Task Manager (processes) on Linux, in one w
 
 ## Positioning
 
-A monitor that shows every sensor the machine exposes rather than a generic dashboard: GPU hotspot and VRAM temperatures that NVIDIA hides on Linux (read through LACT), DIMM temperatures, and exact CPU package power from a small root helper, next to app-grouped processes with per-process GPU use. Entry points for a desk setup are optional: Stream Deck keys and readouts, and an Omarchy bar widget.
+A monitor that shows every sensor the machine exposes rather than a generic dashboard: GPU hotspot and VRAM temperatures that NVIDIA hides on Linux (read through LACT), DIMM temperatures, and exact CPU package power from a small root helper, next to app-grouped processes with per-process GPU use. An optional Omarchy bar widget gives a desk setup a quick look.
 
 ## Operating Context
 
-- The window can open maximized on a chosen monitor, for example from a Stream Deck key, or from the application launcher.
+- The window can open maximized on a chosen monitor, for example from a key binding, or from the application launcher.
 - The collector (`hwglanced`) runs all the time as a user service and keeps min, max and average since login; the window connects to it.
-- The Stream Deck scripts show CPU, GPU, RAM and SSD readouts every 2 s; the Omarchy bar widget opens a quick popup with key values and the top processes.
+- The Omarchy bar widget opens a quick popup with key values and the top processes.
 - Users set their own warning and critical thresholds, highlights, hidden values and layout in the app.
 - English only, Western digits, 24-hour times. No Arabic UI (Arabic window titles and process names are displayed correctly).
 - A desktop tool: no personal, patient or health data, no regulated use.

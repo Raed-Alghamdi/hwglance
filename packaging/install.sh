@@ -120,8 +120,4 @@ case ":$PATH:" in
     *":$BIN:"*) ;;
     *) echo "Note: $BIN is not in your PATH. Add it to start hwglance from a terminal." ;;
 esac
-echo "Optional: copy packaging/config.example.toml to ~/.config/hwglance/config.toml to rename sensors."
-echo "Optional: Stream Deck keys can use streamdeck/sd-stat. Copy both streamdeck/sd-stat and streamdeck/sd-stat-fallback"
-echo "          to the same directory (for example ~/.local/bin). hwglanced writes the key texts to"
-echo "          \$XDG_RUNTIME_DIR/hwglance/streamdeck/{cpu,gpu,ram,ssd}.txt; sd-stat (POSIX sh) prints a fresh one and"
-echo "          runs sd-stat-fallback (Python, about 22 ms of CPU per call) only when it is missing or older than 5 s."
+echo "Optional: copy packaging/config.example.toml to ~/.config/hwglance/config.toml to rename sensors or turn on the plain-text readouts."

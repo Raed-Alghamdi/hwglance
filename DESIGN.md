@@ -409,7 +409,7 @@ The kill confirmation is a modal on the popup frame (16 px margin, 440 px wide):
 Material Design icons from the embedded mono Nerd Font (cog, eye, chevrons, thermometer, pause, pin, bell, pencil, dock bottom, dock right, expand, collapse and others), coloured with ink or state colours like text.
 
 ### Motion
-**The One Flash Rule.** The only authored animation is the focus flash: when a row is focused (from a notification, the Stream Deck or a flagged legend chip) the window scrolls it to centre and washes it green, starting at 45 % and easing out exponentially over 1.2 s. Nothing else pulses, glows or animates.
+**The One Flash Rule.** The only authored animation is the focus flash: when a row is focused (from a notification or a flagged legend chip) the window scrolls it to centre and washes it green, starting at 45 % and easing out exponentially over 1.2 s. Nothing else pulses, glows or animates.
 
 ### Scoped Exception: Omarchy Bar Widget
 The Quickshell widget (`omarchy-plugin/raed.hwglance/`) follows the Omarchy shell design, not this world: it inherits the shell's Style tokens (corner radius, fills, font sizes, font family) and the active Omarchy theme's `colors.toml`, and it ignores the window's light and dark palettes.

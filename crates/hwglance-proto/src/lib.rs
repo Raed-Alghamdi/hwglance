@@ -396,8 +396,8 @@ pub struct Snapshot {
     pub limits_error: Option<String>,
 }
 
-/// Headline values. Also written every sample to [`summary_path`] for the
-/// Stream Deck keys and any bar widget.
+/// Headline values. Also written every sample to [`summary_path`] for any
+/// bar widget or script.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub struct Summary {
     pub unix_ms: u64,
