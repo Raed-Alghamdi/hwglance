@@ -4,49 +4,49 @@
 
 # HW Glance
 
-HW Glance is a hardware monitor for the Linux desktop. It puts every sensor your machine exposes (CPU, GPU, memory, drives, motherboard) and a Task Manager style process list in one window, laid out so a value can be found in about a second. A small background collector keeps min, max, average and a short history of every reading, and the window and an optional bar widget both read from it.
+Every sensor on your Linux desktop and a Task Manager style process list, in one window.
+
+HW Glance shows the readings your machine exposes (CPU, GPU, memory, drives, motherboard) in per-device cards, so you can find one in about a second. A background collector records every reading; the window and an optional bar widget read from it.
 
 ![HW Glance main window, dark theme](docs/screenshots/main-dark.png)
 
-The screenshots in this README are rendered from built-in demo data, not from a real machine.
+The screenshots use built-in demo data.
 
-## Features
+## What it does
 
-- Per-device cards for CPU, GPU, memory, each drive, motherboard and integrated GPU. Every reading shows current, min, max and average, with a range bar against its own scale.
-- Warning and critical limits with flag letters (H, HH, L, LL) and colours, kept for every reading in a plain file (`thresholds.json`) you can edit by hand or from the window, and desktop notifications that open the window at the value.
-- Thermal and power throttling shown as Yes/No on the CPU and GPU cards, with a count and the time of the last event.
-- A history for every value (30 minutes by default), shown in a popover on hover.
-- A process list grouped like Task Manager (Apps, Background, System), sortable by CPU, GPU, VRAM and memory, with per-process GPU use. End task, and a confirmed Force kill.
-- A process panel that docks at the bottom or on the right, each with a compact and an expanded view, a column picker and a resizable name column.
-- Watched values, hidden values, renamed sensors, a drag-and-drop card layout, dark and light themes that follow the desktop.
-- Light on the machine: the collector and the window each stay well under 2% of one core.
+- **Device cards** for the CPU, GPU, memory, each drive, the motherboard and an integrated GPU. Each reading shows current, min, max and average, a range bar, and a 30 minute history on hover.
+- **Limits and alerts.** Warning and critical limits mark a reading with a colour and a flag letter (H, HH, L, LL) and send a desktop notification. You can edit them in [`thresholds.json`](#limits-thresholdsjson).
+- **Throttling.** CPU and GPU cards show thermal and power throttling as Yes/No, with a count and the last event's time.
+- **Processes** grouped as Apps, Background and System, sortable by CPU, GPU, VRAM and memory, with per-process GPU use. The panel docks at the bottom or the right, compact or expanded.
+- **Safe actions.** End task sends a normal exit request at once. Force kill, and any process critical to the session (compositor, audio server, the collector), asks first. Other users' processes go through polkit.
+- **Resets act at once.** The reset button then reads Undo for 30 seconds, and Ctrl+Z takes back the latest reset.
+- **Your layout.** Watch, hide or rename readings, drag cards into place, and pick dark or light themes that follow the desktop. The top bar has its own Maximize and Close buttons.
+- **Text readouts** (opt-in) for status bars, scripts and macro keypads: see [Text readouts](#text-readouts).
+- **Light.** The collector and the window each stay well under 2% of one core.
 
 | Light theme | Process panel docked on the right |
 |---|---|
 | ![Light theme](docs/screenshots/main-light.png) | ![Compact process panel on the right](docs/screenshots/dock-right-compact.png) |
 
-## Requirements
+## What you need
 
-Required:
+Required: Linux with systemd (the collector is a systemd user service), a Wayland or X11 session with OpenGL, and Rust 1.95 or newer to build, with the Wayland, X11 and OpenGL development packages (`.github/workflows/ci.yml` lists the Debian names).
 
-- Linux with systemd (the collector runs as a systemd user service).
-- A desktop session with OpenGL on Wayland or X11.
-- Rust 1.95 or newer to build (`rustup` or your distribution's `rust` package).
-
-Optional, each one adds readings or features:
+Optional, each adds readings or features:
 
 | Component | What it adds |
 |---|---|
-| NVIDIA driver (NVML) | GPU load, temperature, clocks, VRAM use, power and fan on NVIDIA cards |
-| [LACT](https://github.com/ilya-zlobintsev/LACT) daemon | GPU hotspot and VRAM temperatures, fan RPM and core voltage, which the NVIDIA driver does not expose on Linux |
-| The root helper (`hwglance-helper`, installed by default) | CPU package power from RAPL and memory speed and module details from SMBIOS, both of which only root can read |
-| Kernel hwmon drivers for your board (for example `nct6775`, `asus-ec-sensors`) | Motherboard temperatures and fans |
-| Hyprland | Window titles in the process list, and the maximized-window state |
-| Omarchy | The bar widget, and the window following the Omarchy theme and font |
-| polkit and `pkexec` | Ending processes that belong to other users |
-| An Arabic font | Arabic window titles and process names (the text is shaped and ordered correctly either way) |
+| NVIDIA driver (NVML) | GPU load, temperature, clocks, VRAM, power and fan |
+| [LACT](https://github.com/ilya-zlobintsev/LACT) daemon | GPU hotspot and VRAM temperatures, fan RPM and core voltage (the NVIDIA driver hides them on Linux) |
+| The root helper (`hwglance-helper`, installed by default) | CPU package power (RAPL) and memory speed and modules (SMBIOS), which only root can read |
+| Board hwmon drivers (`nct6775`, `asus-ec-sensors`) | Motherboard temperatures and fans |
+| `notify-send` (libnotify) and a notification daemon | Notifications when a limit is crossed |
+| Hyprland | Window titles in the process list, and the maximized state |
+| Omarchy | The bar widget, the theme and font, and the notification's Open button |
+| polkit (`pkexec`) | Ending other users' processes |
+| An Arabic font | Arabic window titles and process names |
 
-## Build and install
+## Install and uninstall
 
 ```sh
 git clone https://github.com/Raed-Alghamdi/hwglance.git
@@ -54,129 +54,98 @@ cd hwglance
 packaging/install.sh
 ```
 
-The script checks its prerequisites, builds the release binaries at low priority, and installs:
+The script builds release binaries at low priority and installs:
 
-- `hwglance` (the window) and `hwglanced` (the collector) to `~/.local/bin`, with a desktop entry and an icon;
-- the `hwglanced` systemd user service, enabled and started;
-- the root helper to `/usr/local/libexec` with its systemd unit, which needs root;
-- the Omarchy bar widget, only if Omarchy is detected.
+- `hwglance` (the window) and `hwglanced` (the collector) in `~/.local/bin`, a desktop entry and the app icon (SVG, and PNG from 16 to 512 px);
+- the collector's systemd user service, enabled and started;
+- the root helper in `/usr/local/libexec` with its systemd unit (needs root);
+- the Omarchy bar widget, if Omarchy is detected.
 
-Options and variables:
+Put `~/.local/bin` in your `PATH`, then start the window from your launcher or with `hwglance`. `hwglance --demo` runs it on demo data, without the collector.
 
 - `packaging/install.sh --no-helper` skips the root helper. CPU power is then estimated and memory speed is not shown.
-- `SUDO=doas packaging/install.sh` runs the root steps through another command (default `sudo`). Only the helper needs root.
-- Make sure `~/.local/bin` is in your `PATH`.
+- `SUDO=doas packaging/install.sh` runs the root steps through another command (default `sudo`).
 
-Start the window from your launcher, or with `hwglance`. `hwglance --demo` runs it on demo data without the collector.
+`packaging/uninstall.sh` removes everything the installer added and keeps your config. Add `--no-helper` to keep the root helper.
 
-To remove everything the installer put in place (your config stays):
+## Configure
 
-```sh
-packaging/uninstall.sh            # add --no-helper to keep the root helper
-```
+Files live in `~/.config/hwglance/` (`$XDG_CONFIG_HOME/hwglance/` when set):
 
-## Configuration
+| File | Holds | Edited by |
+|---|---|---|
+| `ui.json` | Watched readings, layout, theme | the window |
+| `thresholds.json` | Warning and critical limits | you or the window |
+| `config.toml` | Collector settings (optional) | you |
 
-Settings changed in the window (watched values, layout, theme) are saved to `~/.config/hwglance/ui.json`. The warning and critical limits are not: they live in `~/.config/hwglance/thresholds.json` (see Thresholds below).
+For `config.toml`, copy [`packaging/config.example.toml`](packaging/config.example.toml); every key is optional and its comments explain it. The collector reads the file at start, so run `systemctl --user restart hwglanced` after an edit. A file that does not parse is ignored whole, and the collector log says why (`journalctl --user -u hwglanced`).
 
-Collector settings are optional and live in `~/.config/hwglance/config.toml`. Copy [`packaging/config.example.toml`](packaging/config.example.toml) as a starting point. It covers the sample intervals, renaming sensors with a `[labels]` table (keyed `chip/sensor`), hiding readings with `[hide]`, and the CPU limit below. `hwglanced --once --json` prints every reading id and sensor name your machine has.
+- `interval_ms` and `slow_interval_ms` set the sample intervals (defaults 1000 and 2000 ms).
+- `[labels]` renames sensors and `[hide]` hides readings. `hwglanced --once --json` prints every reading id and sensor name on your machine.
+- `cpu_thermal_limit_c` (40 to 120 °C) is the temperature at which the CPU lowers its clocks. The Thermal throttling reading and the default CPU temperature limits use it (warning: 9 °C lower). Without it, the limit is the driver's (`temp*_crit`, else `temp*_max`), else AMD's published Tjmax for your Ryzen (`amd_tjmax` in [`crates/hwglanced/src/cpu.rs`](crates/hwglanced/src/cpu.rs)), else 95 °C. AMD CPUs do not report throttling to Linux, so HW Glance infers "Yes" within 0.5 °C of the limit; Intel CPUs report real events.
 
-### CPU thermal limit
+### Text readouts
 
-The top-level key `cpu_thermal_limit_c` (40 to 120, in °C) sets the temperature at which the CPU lowers its clocks. The CPU "Thermal throttling" reading and the default CPU temperature limits use it. Without the key the limit is, in order:
+With `text_readouts = true`, the collector rewrites four files after every fast sample in `$XDG_RUNTIME_DIR/hwglance/text/`: `cpu.txt`, `gpu.txt`, `ram.txt` and `ssd.txt`. Each has two lines, a label and the values, for example `CPU` then `55° 12%` (temperature, usage). Files are replaced atomically, and a readout with no values has no file. With the key off or absent, nothing is written and files from an earlier run are removed.
 
-1. the limit the driver reports (`temp*_crit`, else `temp*_max`);
-2. for AMD CPUs, a built-in table of AMD's published Tjmax per Ryzen model (`amd_tjmax` in [`crates/hwglanced/src/cpu.rs`](crates/hwglanced/src/cpu.rs));
-3. 95 °C.
+### Limits (`thresholds.json`)
 
-The warning limit is the critical one minus 9 °C. Intel CPUs report real throttle events (the `thermal_throttle` counters). AMD CPUs do not report throttling to Linux, so it is inferred: "Yes" while the temperature is within half a degree of the limit.
-
-### Thresholds
-
-The warning and critical limits of every reading are kept in `~/.config/hwglance/thresholds.json` (under `$XDG_CONFIG_HOME` when that is set). Only the collector writes this file. It creates it on first start with every reading that can have a limit, so you can open it and change a number:
+The collector creates this file on first start with every reading that can have a limit. Open it from Settings, Alerts (Open file), or edit a limit from a reading's right-click menu. One entry looks like this:
 
 ```json
-{
-  "version": 1,
-  "readings": {
-    "cpu/temp/tctl": {
-      "name": "CPU · Temperatures · Tctl",
-      "unit": "°C",
-      "warn": 80,
-      "crit": 89,
-      "below": false,
-      "default": { "warn": 80, "crit": 89 }
-    },
-    "board/fan/nct6798/fan1": {
-      "name": "Motherboard · Fans · Pump",
-      "unit": "RPM",
-      "warn": 1500,
-      "crit": 800,
-      "below": true,
-      "default": { "warn": null, "crit": null }
-    }
-  }
+"cpu/temp/tctl": {
+  "name": "CPU · Temperatures · Tctl",
+  "unit": "°C",
+  "warn": 80,
+  "crit": 89,
+  "below": false,
+  "default": { "warn": 80, "crit": 89 }
 }
 ```
 
-- `warn` and `crit` are numbers in the unit shown (GiB for memory amounts, MB/s for transfer rates), or `null` for no limit at that level. A value at or above `warn` is a warning, at or above `crit` critical. With `"below": true` the direction flips: at or below the limit, for fans and pumps. To add a limit to a reading that has none, replace `null` with a number.
-- `name`, `unit` and `default` are for your eyes: the collector refreshes them and ignores them when it reads the file.
-- An entry whose `warn`, `crit` and `below` equal the defaults is "default". Anything else replaces the defaults as a whole, everywhere: the colours and flag letters in the window and the bar widget, the notifications, and the crossings list. A level you leave `null` has no limit, even where the default has one. Delete an entry to give that reading its defaults back.
-- The collector checks the file's modification time every 2 seconds and applies a valid edit without rewriting the file.
-- A file that is invalid (broken JSON, a limit that is not a number, ...) is not applied and not overwritten. The last good limits stay in force, the window shows a banner (and Settings, Alerts shows the file's path and the error with its line and column), and the collector logs it. Fix the file and the next check clears the banner.
-- The collector writes the file only to create it, to list readings that appear later (your values and the entries of readings that are not present, such as an unplugged drive, are kept), and when you change a limit in the window. The right-click menu of a value and Settings, Sensors send that change to the collector, which writes the same file. Settings, Alerts has an Open file button.
-- Limits you set in `ui.json` with an older version are folded into this file once, the first time it is created.
+- `warn` and `crit` are numbers in the unit shown (GiB for memory, MB/s for transfer rates), or `null` for no limit at that level. At or above `warn` is a warning, at or above `crit` critical. With `"below": true` the direction flips, for fans and pumps. To add a limit, replace `null` with a number.
+- `name`, `unit` and `default` are for reference: the collector refreshes them and ignores your edits to them.
+- An entry equal to its defaults is "default". Any other entry replaces the defaults as a whole, everywhere (window, bar widget, notifications), so a level left `null` has no limit even where the default has one. Delete an entry to restore its defaults.
+- The collector checks the file every 2 seconds and applies a valid edit without rewriting it. It writes only to create the file, to add readings that appear later (your values stay, also for absent readings such as an unplugged drive), and on a change from the window.
+- An invalid file (broken JSON, a limit that is not a number) is not applied or overwritten. The last good limits stay and the window shows a banner (Settings, Alerts has the path and the error's line and column). Fix the file and the banner clears.
+- Limits an older version kept in `ui.json` move into this file once, when it is first created.
 
-## Optional extras
+## Omarchy bar widget
 
-### Omarchy bar widget
-
-[`omarchy-plugin/raed.hwglance`](omarchy-plugin/raed.hwglance) is a bar widget for the [Omarchy](https://omarchy.org) shell: an icon or live CPU and GPU usage in the bar, and a popup with key readings and the top processes. `packaging/install.sh` copies it into place on an Omarchy system; enable it once with `omarchy plugin enable raed.hwglance`. The plugin id is `author.name`, which is why it carries the author's handle. See its [README](omarchy-plugin/raed.hwglance/README.md).
+[`omarchy-plugin/raed.hwglance`](omarchy-plugin/raed.hwglance) adds an icon or live CPU and GPU usage to the [Omarchy](https://omarchy.org) bar, with a popup of key readings and the top processes. `packaging/install.sh` copies it into place on Omarchy; enable it once with `omarchy plugin enable raed.hwglance`. See its [README](omarchy-plugin/raed.hwglance/README.md).
 
 ## Privacy and safety
 
-- Sensors are read only. HW Glance never writes fan, clock, power or any other hardware setting.
-- Nothing leaves your machine. There is no network code in the window or the collector, and no telemetry. The collector serves the window and the bar widget over a Unix socket in `$XDG_RUNTIME_DIR`.
-- The collector runs as your user. The only root part is `hwglance-helper`: it reads the SMBIOS tables once and the RAPL energy counters every second, and publishes one-second averages (finer readings are what power side channels need). It has no network, no child processes and no other writes, and its systemd unit is sandboxed (`ProtectSystem=strict`, `ProtectHome`, `PrivateNetwork`, `NoNewPrivileges`, an empty capability set and a system call filter, among others). Skip it with `--no-helper`.
-- A process is only ended when you ask: End task asks first, Force kill asks again and names the target, and ending a process that belongs to another user goes through polkit. Processes the app knows to be critical to the session (the compositor, the audio server, the collector itself) carry an extra warning.
+- Sensors are read only. HW Glance never writes a fan, clock, power or other hardware setting.
+- Nothing leaves your machine: no telemetry and no network code. The window and the bar widget talk to the collector over a Unix socket in `$XDG_RUNTIME_DIR`.
+- The collector runs as your user. Only the root helper runs as root: it reads the SMBIOS tables once and the RAPL energy counters every second, and publishes one-second averages (finer readings are what power side channels need). It has no network, child processes or other writes, and its systemd unit is sandboxed.
 
 ## Known limitations
 
-- It has been tested on real hardware on one desktop only (AMD Ryzen with an NVIDIA GPU). Intel CPUs and discrete AMD GPUs are implemented but covered so far only by tests with fake sysfs data. Other hardware, laptops especially, may show missing or oddly named readings. Bug reports with the output of `hwglanced --once --json` are welcome.
+- Tested on real hardware on one desktop (AMD Ryzen, NVIDIA GPU, Omarchy on Hyprland). Intel CPUs and discrete AMD GPUs are covered only by tests with fake sysfs data. Other hardware, laptops especially, may show missing or oddly named readings. Bug reports with the output of `hwglanced --once --json` are welcome.
 - The window is English only.
-- The bar widget and the Hyprland features are Omarchy and Hyprland specific. Other compositors work, but without window titles.
-
-### Hardware notes
-
-- Names come from the system: the CPU from `/proc/cpuinfo`, GPUs from the driver or the PCI ID database, the board and memory from SMBIOS/DMI, drives from sysfs.
-- AMD integrated and discrete GPUs are told apart by a heuristic. A laptop discrete GPU that has only an edge sensor, no fan and under 3 GiB of VRAM can be taken for an integrated one, and there is no override yet. Only one integrated GPU gets a card.
-- NVIDIA support covers the first NVML device only (no multi-NVIDIA setups). The nouveau and the old radeon drivers get no card.
-- Intel GPUs show their name, hwmon temperatures, fan and GT clock, nothing more.
-- AMD GPUs have no throttle state in sysfs, so they have no GPU Limits section. Throttling inferred on AMD CPUs can miss brief events.
+- The bar widget, the notification Open button and window titles need Omarchy or Hyprland. Other compositors work without them.
+- GPUs: an AMD laptop GPU with only an edge sensor, no fan and under 3 GiB of VRAM can be taken for an integrated one (no override yet), and only one integrated GPU gets a card. NVIDIA support covers the first NVML device only. The nouveau and old radeon drivers get no card. Intel GPUs show their name, hwmon temperatures, fan and GT clock. AMD GPUs have no throttle state in sysfs, so no GPU Limits section.
 - Super I/O chips other than `nct6*` show fans only, and chips with plain `tempN` labels (it87 and similar) show no board temperatures.
 
 ## Contributing
 
 ```sh
-cargo run -p hwglance -- --demo     # the window on demo data
+cargo run -p hwglance -- --demo           # the window on demo data
 cargo run -p hwglanced -- --once --json   # one sample from the collector
-scripts/check.sh                    # tests, clippy, bar widget model checks
+scripts/check.sh                          # tests, clippy, bar widget model checks (needs Node.js)
 ```
 
-- `scripts/check.sh` is the check to pass before a pull request. The golden image tests in `crates/hwglance/tests/snapshots/` are rendered on a GPU; if you change the UI on purpose, refresh them with `UPDATE_SNAPSHOTS=1 cargo test -p hwglance --test snapshots` and look at the PNG diff. `HWGLANCE_SKIP_GOLDEN=1` skips the comparison on a machine without a usable GPU.
-- The README screenshots are regenerated from the demo data with `scripts/readme-shots.sh` (output in `docs/screenshots/`).
-- `PRODUCT.md` and `DESIGN.md` describe who the app is for and the visual system (tokens, rules, layout). `CLAUDE.md` holds short notes for AI coding agents.
-- Please do not use em dashes in code, UI text or docs.
+- Pass `scripts/check.sh` before a pull request.
+- The golden image tests in `crates/hwglance/tests/snapshots/` are rendered on a GPU. After an intended UI change, run `UPDATE_SNAPSHOTS=1 cargo test -p hwglance --test snapshots` and review the PNG diff. `HWGLANCE_SKIP_GOLDEN=1` skips the comparison without a usable GPU.
+- `scripts/readme-shots.sh` regenerates the README screenshots from demo data.
+- [`PRODUCT.md`](PRODUCT.md) says who the app is for, [`DESIGN.md`](DESIGN.md) describes the visual system, and [`CLAUDE.md`](CLAUDE.md) has notes for AI coding agents.
 
 ## License
 
-HW Glance is free software under the [GNU General Public License v3.0 or later](LICENSE). Copyright 2026 Raed Alghamdi.
+HW Glance is free software under the [GNU General Public License v3.0 or later](LICENSE), Copyright 2026 Raed Alghamdi. The bar widget is under the MIT license (see the `LICENSE` file in its directory). Rust dependencies carry GPL-compatible licenses (MIT, Apache-2.0, BSD and similar); `cargo metadata` lists them.
 
-The Omarchy bar widget in `omarchy-plugin/raed.hwglance` is under the MIT license (see the `LICENSE` file in that directory).
-
-Bundled fonts (see [`crates/hwglance/assets/fonts`](crates/hwglance/assets/fonts), whose [README](crates/hwglance/assets/fonts/README.md) lists the third-party notices), all under the SIL Open Font License 1.1:
+Bundled fonts, both under the SIL Open Font License 1.1 (the [fonts README](crates/hwglance/assets/fonts/README.md) lists third-party notices):
 
 - [Atkinson Hyperlegible](https://www.brailleinstitute.org/freefont/), Copyright 2020 Braille Institute of America, Inc.
-- AtkynsonMono Nerd Font Mono, a Nerd Fonts patched build of Atkinson Hyperlegible Mono (Braille Institute of America, Inc.), which also carries the icon glyphs of the [Nerd Fonts](https://www.nerdfonts.com/) project.
-
-The Rust dependencies are under MIT, Apache-2.0, BSD, Zlib, ISC, MPL-2.0 and similar licenses that are compatible with the GPL; `cargo metadata` lists them.
+- AtkynsonMono Nerd Font Mono, a Nerd Fonts patched build of Atkinson Hyperlegible Mono (Braille Institute of America, Inc.) that also carries the icon glyphs of the [Nerd Fonts](https://www.nerdfonts.com/) project.
