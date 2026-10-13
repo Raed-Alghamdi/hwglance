@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <title>HW Glance</title>
+  <!-- Night-shift ground, a lifted panel, and three result rows in the device hues (DESIGN.md):
+       CPU blue, GPU violet, memory cyan. Amber, red and green stay out: they carry meaning. -->
+  <rect width="128" height="128" rx="28" fill="#0B0E13"/>
+  <rect x="14" y="14" width="100" height="100" rx="16" fill="#121821" stroke="#263040" stroke-width="2"/>
+  <g>
+    <rect x="26" y="30" width="76" height="14" rx="7" fill="#263040"/>
+    <rect x="26" y="30" width="52" height="14" rx="7" fill="#5AA8FF"/>
+    <rect x="26" y="57" width="76" height="14" rx="7" fill="#263040"/>
+    <rect x="26" y="57" width="34" height="14" rx="7" fill="#B591FF"/>
+    <rect x="26" y="84" width="76" height="14" rx="7" fill="#263040"/>
+    <rect x="26" y="84" width="64" height="14" rx="7" fill="#33D1E3"/>
+  </g>
+  <g fill="#ECF1F7">
+    <rect x="76" y="27" width="4" height="20" rx="2"/>
+    <rect x="58" y="54" width="4" height="20" rx="2"/>
+    <rect x="88" y="81" width="4" height="20" rx="2"/>
+  </g>
+</svg>

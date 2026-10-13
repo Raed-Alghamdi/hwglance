@@ -1,0 +1,34 @@
+[Unit]
+Description=hwglance root helper (RAPL package power, SMBIOS memory speed)
+After=sysinit.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/libexec/hwglance-helper
+RuntimeDirectory=hwglance-helper
+RuntimeDirectoryMode=0755
+UMask=0022
+# Root reads its own 0400 files by ownership, so no capabilities are needed.
+CapabilityBoundingSet=
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+PrivateDevices=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=none
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,7 @@
+{
+  "tray": {
+    "popup_values": ["cpu/usage/total", "cpu/temp/tctl", "cpu/power/package", "cpu/clock/max", "gpu0/load/core", "gpu0/temp/core", "gpu0/temp/hotspot", "gpu0/mem/used", "gpu0/power/draw", "memory/usage/pct", "memory/usage/used", "memory/temp/summary"],
+    "popup_process_count": 5,
+    "popup_sort": "memory"
+  }
+}

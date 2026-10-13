@@ -1,0 +1,27 @@
+//! HW Glance: the window of a personal Linux hardware monitor.
+
+pub mod a11y;
+pub mod actions;
+pub mod app;
+pub mod collector_cfg;
+pub mod conn;
+pub mod crossings;
+pub mod demo;
+pub mod fonts;
+pub mod history;
+pub mod icons;
+pub mod layout;
+pub mod limits;
+pub mod model;
+pub mod procs;
+pub mod rangebar;
+pub mod search;
+pub mod sensors;
+pub mod settings;
+pub mod settings_ui;
+pub mod system_theme;
+pub mod text;
+pub mod theme;
+pub mod thresholds;
+pub mod ui_kit;
+pub mod winctl;

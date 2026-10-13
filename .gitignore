@@ -1,0 +1,14 @@
+target/
+# local design-process state
+.design/
+.impeccable/
+# editor and OS junk
+*.swp
+*~
+.idea/
+.vscode/
+.DS_Store
+# egui_kittest snapshot test outputs (only the golden PNGs are tracked)
+crates/hwglance/tests/snapshots/*.diff.png
+crates/hwglance/tests/snapshots/*.new.png
+crates/hwglance/tests/snapshots/*.old.png

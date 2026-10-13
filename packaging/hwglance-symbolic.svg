@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <title>HW Glance</title>
+  <!-- Symbolic variant of the app icon: its three result rows in one colour, so the theme can
+       tint it. Tracks sit at reduced opacity, the bars at full. -->
+  <g fill="#2e3436">
+    <rect x="1" y="2" width="14" height="3" rx="1.5" opacity="0.35"/>
+    <rect x="1" y="2" width="9" height="3" rx="1.5"/>
+    <rect x="1" y="6.5" width="14" height="3" rx="1.5" opacity="0.35"/>
+    <rect x="1" y="6.5" width="6" height="3" rx="1.5"/>
+    <rect x="1" y="11" width="14" height="3" rx="1.5" opacity="0.35"/>
+    <rect x="1" y="11" width="11.5" height="3" rx="1.5"/>
+  </g>
+</svg>

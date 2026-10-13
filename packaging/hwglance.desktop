@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=HW Glance
+Comment=Hardware sensors and processes
+Exec=hwglance
+Icon=hwglance
+Terminal=false
+Categories=System;Monitor;
+StartupWMClass=hwglance

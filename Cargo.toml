@@ -1,0 +1,21 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/hwglance-proto",
+    "crates/hwglanced",
+    "crates/hwglance",
+    "crates/hwglance-helper",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/Raed-Alghamdi/hwglance"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+strip = true

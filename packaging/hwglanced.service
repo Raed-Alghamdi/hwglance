@@ -1,0 +1,15 @@
+[Unit]
+Description=hwglance sensor and process collector
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/hwglanced
+Restart=on-failure
+RestartSec=2
+# Sampling must never compete with a game or a build for the CPU.
+Nice=10
+
+[Install]
+WantedBy=graphical-session.target

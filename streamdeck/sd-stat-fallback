@@ -1,0 +1,147 @@
+#!/usr/bin/python3
+"""sd-stat-fallback cpu|gpu|ram|ssd : two short lines (label, values) for a Stream Deck key.
+
+`sd-stat` (a POSIX sh script) prints the ready-made text the collector writes for each key and
+only runs this script when that text is missing or older than 5 s: starting Python costs about
+22 ms of CPU per call, which four keys every 2 s turn into 4 % of a core. This is also the
+debugging path (`sd-stat-fallback cpu` always works from the summary or the hardware).
+
+Reads the hwglance summary file ($XDG_RUNTIME_DIR/hwglance/summary.json, written every
+second by hwglanced) when it is fresh. When it is missing or older than 5 s, falls back to
+reading sysfs, /proc and nvidia-smi directly, as before.
+"""
+import glob
+import json
+import os
+import subprocess
+import sys
+import time
+
+SUMMARY_MAX_AGE_S = 5.0
+
+
+def load_summary():
+    """The hwglance summary dict, or None when missing, unreadable or stale."""
+    runtime = os.environ.get("XDG_RUNTIME_DIR") or "/run/user/%d" % os.getuid()
+    try:
+        with open(os.path.join(runtime, "hwglance", "summary.json")) as f:
+            s = json.load(f)
+        age = time.time() - s["unix_ms"] / 1000.0
+        return s if -1.0 <= age < SUMMARY_MAX_AGE_S else None
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def from_summary(key, s):
+    """(label, text) for a key from the summary, or None when its values are missing."""
+    def num(name):
+        v = s.get(name)
+        return v if isinstance(v, (int, float)) else None
+
+    if key == "cpu":
+        t, u = num("cpu_temp_c"), num("cpu_usage_pct")
+        if u is None:
+            return None
+        us = "%d%%" % round(u)
+        return "CPU", ("%d° %s" % (round(t), us)) if t is not None else us
+    if key == "gpu":
+        t, u = num("gpu_temp_c"), num("gpu_usage_pct")
+        if t is None or u is None:
+            return None
+        return "GPU", "%d° %d%%" % (round(t), round(u))
+    if key == "ram":
+        p = num("ram_used_pct")
+        return ("RAM", "%d%%" % round(p)) if p is not None else None
+    if key == "ssd":
+        t = num("ssd_temp_max_c")
+        return ("SSD", "%d°C" % round(t)) if t is not None else None
+    return None
+
+
+def hwmon_temps(name, label=None):
+    out = []
+    for d in glob.glob("/sys/class/hwmon/hwmon*"):
+        try:
+            if open(d + "/name").read().strip() != name:
+                continue
+            for f in sorted(glob.glob(d + "/temp*_input")):
+                lab = ""
+                try:
+                    lab = open(f.replace("_input", "_label")).read().strip()
+                except OSError:
+                    pass
+                if label is None or lab == label:
+                    out.append(int(open(f).read()) / 1000.0)
+        except (OSError, ValueError):
+            continue
+    return out
+
+
+def cpu_usage():
+    def snap():
+        v = [int(x) for x in open("/proc/stat").readline().split()[1:]]
+        return v[3] + v[4], sum(v)  # idle+iowait, total
+    i1, t1 = snap()
+    time.sleep(0.3)
+    i2, t2 = snap()
+    return 100.0 * (1 - (i2 - i1) / (t2 - t1)) if t2 > t1 else 0.0
+
+
+def cpu():
+    t = hwmon_temps("k10temp", "Tctl") or hwmon_temps("k10temp")
+    try:
+        u = "%d%%" % round(cpu_usage())
+    except Exception:
+        u = "--"
+    return "CPU", ("%d° %s" % (round(t[0]), u)) if t else u
+
+
+def gpu():
+    try:
+        r = subprocess.run(
+            ["/usr/bin/nvidia-smi", "--query-gpu=temperature.gpu,utilization.gpu",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=2)
+        t, u = [x.strip() for x in r.stdout.splitlines()[0].split(",")]
+        return "GPU", "%s° %s%%" % (int(t), int(u))
+    except Exception:
+        return "GPU", "n/a"
+
+
+def ram():
+    try:
+        m = {}
+        for line in open("/proc/meminfo"):
+            k, v = line.split(":")
+            m[k] = int(v.split()[0])
+        used = m["MemTotal"] - m["MemAvailable"]
+        return "RAM", "%d%%" % round(100.0 * used / m["MemTotal"])
+    except Exception:
+        return "RAM", "n/a"
+
+
+def ssd():
+    t = hwmon_temps("nvme", "Composite")
+    return "SSD", ("%d°C" % round(max(t))) if t else "n/a"
+
+
+FUNCS = {"cpu": cpu, "gpu": gpu, "ram": ram, "ssd": ssd}
+
+if __name__ == "__main__":
+    key = sys.argv[1].lower() if len(sys.argv) > 1 else ""
+    if key not in FUNCS:
+        print("usage: sd-stat cpu|gpu|ram|ssd", file=sys.stderr)
+        sys.exit(2)
+    result = None
+    try:
+        summary = load_summary()
+        if summary is not None:
+            result = from_summary(key, summary)
+    except Exception:
+        result = None
+    try:
+        a, b = result if result is not None else FUNCS[key]()
+    except Exception:
+        a, b = key.upper(), "n/a"
+    print(a)
+    print(b)

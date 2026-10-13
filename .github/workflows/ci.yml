@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  # The golden image tests are rendered on a GPU, which a hosted runner does not have.
+  HWGLANCE_SKIP_GOLDEN: "1"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libxkbcommon-dev libwayland-dev libgl1-mesa-dev libegl1-mesa-dev \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build
+        run: cargo build --workspace --all-targets
+
+      - name: Clippy (warnings are reported, not fatal)
+        run: cargo clippy --workspace --all-targets
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Bar widget model checks
+        run: node omarchy-plugin/harness/model-test.js

@@ -1,0 +1,39 @@
+# hwglance configuration. Copy to ~/.config/hwglance/config.toml.
+# Every setting is optional; the values shown are the built-in defaults.
+
+# Fast sample interval in milliseconds: CPU, temperatures, fans, memory, disk rates,
+# NVIDIA readings and (while the process view is open) the process list.
+# interval_ms = 1000
+
+# Slow sample interval in milliseconds: LACT (GPU hotspot, VRAM temperatures, fan RPM,
+# core voltage), DIMM temperatures, NVMe temperatures and the Wi-Fi card. These talk to
+# the device itself, so they are read less often.
+# slow_interval_ms = 2000
+
+# Temperature (40 to 120 degrees C) at which the CPU lowers its clocks to stay cool. The CPU
+# "Thermal throttling" row and the default CPU temperature limits use it; the warning limit
+# is this minus 9. Without this key the limit is, in order: the limit the driver reports
+# (temp*_crit, else temp*_max), AMD's published Tjmax for your Ryzen model (a table built
+# into hwglanced), else 95. AMD does not report throttling to Linux, so it is inferred (Yes
+# while the temperature is within 0.5 degrees of the limit); Intel CPUs report real events.
+# The warning and critical limits of other readings are not set here but in
+# ~/.config/hwglance/thresholds.json.
+# cpu_thermal_limit_c = 89
+
+# Display names for sensors, keyed "chip/sensor". To find the ids, run
+# `hwglanced --once --json` and look at the reading ids under "Motherboard": a fan with the
+# id "board/fan/nct6798/fan1" is the sensor "fan1" of the chip "nct6798", so its key is
+# "nct6798/fan1". For fans the sensor is the sysfs label when there is one (for example
+# "CPU_Opt") or fanN; for temperatures it is the sysfs label (for example "AUXTIN0"). A
+# fan that reads 0 RPM is hidden unless it has a label here or in sysfs.
+[labels]
+# Example (the chip and sensor names depend on your board):
+# "nct6798/fan1" = "Front intake"
+
+# Readings to leave out of the table, by reading id (see `hwglanced --once --json`).
+# Floating inputs that still report a plausible value are good candidates.
+[hide]
+ids = [
+    # "board/superio/auxtin1",
+    # "cpu/temp/board_package",
+]
