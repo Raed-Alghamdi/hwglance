@@ -28,7 +28,7 @@ die() { echo "install.sh: $*" >&2; exit 1; }
 
 # Prerequisites, checked before anything is built or written.
 [[ $EUID -ne 0 ]] || die "run this as your normal user, not as root (the helper step asks for root itself)"
-command -v cargo >/dev/null || die "cargo not found. Install Rust 1.85 or newer (https://rustup.rs or your distribution's rust package)."
+command -v cargo >/dev/null || die "cargo not found. Install Rust 1.95 or newer (https://rustup.rs or your distribution's rust package)."
 command -v systemctl >/dev/null || die "systemctl not found. HW Glance needs systemd."
 systemctl --user show-environment >/dev/null 2>&1 \
     || die "the systemd user manager is not reachable (systemctl --user failed). Run this from a normal login session."
