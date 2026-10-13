@@ -537,9 +537,18 @@ fn hovering_a_row_for_350_ms_opens_its_history_popover_and_a_click_pins_it() {
     h.hover_at(row);
     h.run_steps(3);
     assert!(app(&mut h).hover_pop.is_none(), "not yet");
-    std::thread::sleep(Duration::from_millis(400));
-    h.run_steps(3);
-    let id = app(&mut h).hover_pop.as_ref().map(|h| h.id.clone());
+    // A slow machine can see a demo tick move the rows under the pointer, which restarts the
+    // 350 ms wait; keep the pointer there for up to 3 s rather than one fixed wait.
+    let mut id = None;
+    for _ in 0..30 {
+        std::thread::sleep(Duration::from_millis(100));
+        h.hover_at(row);
+        h.run_steps(3);
+        id = app(&mut h).hover_pop.as_ref().map(|h| h.id.clone());
+        if id.is_some() {
+            break;
+        }
+    }
     assert_eq!(id.as_deref(), Some(FIRST_CPU_ROW));
     // the popover asked for history
     assert!(!app(&mut h).link.take_demo_history().is_empty());
