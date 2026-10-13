@@ -201,6 +201,8 @@ fn wait_and_step(h: &mut H, ms: u64) {
 
 #[test]
 fn settings_are_written_debounced_and_atomically() {
+    // it changes the font size, a process-wide global that moves every other test's rows
+    let _guard = layout_lock();
     let mut h = harness("persist", (1600.0, 900.0), demo_snapshot(), None, false, false);
     let path = app(&mut h).settings_path.clone();
     assert!(!path.exists(), "a missing file means defaults and nothing is written yet");
