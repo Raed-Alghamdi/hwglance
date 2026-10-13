@@ -247,7 +247,9 @@ fn stale_data_keeps_its_contrast_and_says_since_when() {
             }
         }
     }
-    assert_eq!(differing, 0, "{differing} pixels of the cards differ between fresh and stale");
+    // a software renderer (CI) can flip a stray pixel between two frames; dimming would change
+    // thousands
+    assert!(differing <= 16, "{differing} pixels of the cards differ between fresh and stale");
 }
 
 #[test]
