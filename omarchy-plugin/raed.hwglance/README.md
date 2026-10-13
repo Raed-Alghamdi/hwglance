@@ -4,7 +4,7 @@ A quick-look bar widget for the Omarchy shell and the HW Glance collector: a bar
 
 ## Install
 
-`packaging/install.sh` copies this directory to `~/.config/omarchy/plugins/raed.hwglance` on an Omarchy system. Enable it once with `omarchy plugin enable raed.hwglance`. The collector (`hwglanced`) must be running for the popup and for live usage in the bar. The widget never writes settings.
+`packaging/install.sh` (or `hwglance-bar-widget install`, which the Arch package ships) copies this directory to `~/.config/omarchy/plugins/raed.hwglance` on an Omarchy system and enables it; `hwglance-bar-widget update` refreshes the copy after an upgrade. The collector (`hwglanced`) must be running for the popup and for live usage in the bar. The widget never writes settings.
 
 ## What it shows
 

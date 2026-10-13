@@ -30,7 +30,7 @@ The screenshots use built-in demo data.
 
 ## What you need
 
-Required: Linux with systemd (the collector is a systemd user service), a Wayland or X11 session with OpenGL, and Rust 1.95 or newer to build, with the Wayland, X11 and OpenGL development packages (`.github/workflows/ci.yml` lists the Debian names).
+Required: Linux with systemd (the collector is a systemd user service) and a Wayland or X11 session with OpenGL. Building from source also needs Rust 1.95 or newer and the Wayland, X11 and OpenGL development packages (`.github/workflows/ci.yml` lists the Debian names).
 
 Optional, each adds readings or features:
 
@@ -48,6 +48,31 @@ Optional, each adds readings or features:
 
 ## Install and uninstall
 
+Pick one. All three set up the same two programs, `hwglance` (the window) and `hwglanced` (the collector).
+
+**Arch Linux package.** Download `hwglance-<version>-1-x86_64.pkg.tar.zst` from the [latest release](https://github.com/Raed-Alghamdi/hwglance/releases/latest), then:
+
+```sh
+sudo pacman -U hwglance-0.1.0-1-x86_64.pkg.tar.zst
+systemctl --user enable --now hwglanced
+sudo systemctl enable --now hwglance-helper   # optional, see below
+hwglance-bar-widget install                   # Omarchy only
+```
+
+The package installs system-wide and starts nothing itself. After an upgrade run `systemctl --user restart hwglanced` and `hwglance-bar-widget update`. An AUR package is planned. To remove it, run `systemctl --user disable --now hwglanced` and `hwglance-bar-widget remove` (as your user), then `sudo pacman -R hwglance`.
+
+**Generic x86_64 Linux tarball.** Download `hwglance-<version>-x86_64-linux.tar.gz` from the release (a `.sha256` file sits beside it), then:
+
+```sh
+tar -xzf hwglance-0.1.0-x86_64-linux.tar.gz
+cd hwglance-0.1.0-x86_64-linux
+./install.sh
+```
+
+It holds prebuilt binaries (built on Ubuntu, so it needs a glibc of that age or newer) and needs no Rust. It installs per user, like the source install below, and `./uninstall.sh` reverses it.
+
+**From source.**
+
 ```sh
 git clone https://github.com/Raed-Alghamdi/hwglance.git
 cd hwglance
@@ -56,7 +81,7 @@ packaging/install.sh
 
 The script builds release binaries at low priority and installs:
 
-- `hwglance` (the window) and `hwglanced` (the collector) in `~/.local/bin`, a desktop entry and the app icon (SVG, and PNG from 16 to 512 px);
+- `hwglance` and `hwglanced` in `~/.local/bin`, a desktop entry and the app icon (SVG, and PNG from 16 to 512 px);
 - the collector's systemd user service, enabled and started;
 - the root helper in `/usr/local/libexec` with its systemd unit (needs root);
 - the Omarchy bar widget, if Omarchy is detected.
@@ -64,9 +89,12 @@ The script builds release binaries at low priority and installs:
 Put `~/.local/bin` in your `PATH`, then start the window from your launcher or with `hwglance`. `hwglance --demo` runs it on demo data, without the collector.
 
 - `packaging/install.sh --no-helper` skips the root helper. CPU power is then estimated and memory speed is not shown.
+- `packaging/install.sh --dry-run` prints what it would do and changes nothing.
 - `SUDO=doas packaging/install.sh` runs the root steps through another command (default `sudo`).
 
 `packaging/uninstall.sh` removes everything the installer added and keeps your config. Add `--no-helper` to keep the root helper.
+
+The root helper is optional in every install. Without it CPU power is estimated and memory speed is not shown.
 
 ## Configure
 
@@ -112,7 +140,7 @@ The collector creates this file on first start with every reading that can have 
 
 ## Omarchy bar widget
 
-[`omarchy-plugin/raed.hwglance`](omarchy-plugin/raed.hwglance) adds an icon or live CPU and GPU usage to the [Omarchy](https://omarchy.org) bar, with a popup of key readings and the top processes. `packaging/install.sh` copies it into place on Omarchy; enable it once with `omarchy plugin enable raed.hwglance`. See its [README](omarchy-plugin/raed.hwglance/README.md).
+[`omarchy-plugin/raed.hwglance`](omarchy-plugin/raed.hwglance) adds an icon or live CPU and GPU usage to the [Omarchy](https://omarchy.org) bar, with a popup of key readings and the top processes. `packaging/install.sh` copies it into place and enables it on Omarchy; with the Arch package run `hwglance-bar-widget install` (and `hwglance-bar-widget update` after an upgrade, `hwglance-bar-widget remove` to take it out). See its [README](omarchy-plugin/raed.hwglance/README.md).
 
 ## Privacy and safety
 

@@ -37,6 +37,8 @@ depends=(
   libxrender
 )
 makedepends=(cargo)
+# The release profile already strips the binaries, so a -debug package would only hold links.
+options=(!debug)
 optdepends=(
   'nvidia-utils: NVIDIA GPU readings (NVML)'
   'lact: GPU hotspot and VRAM temperatures, fan RPM and core voltage'

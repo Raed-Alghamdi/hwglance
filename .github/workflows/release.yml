@@ -1,0 +1,146 @@
+name: Release
+
+# Pushing a tag such as v0.1.0 builds the generic tarball and the Arch package, then publishes
+# a GitHub release with both, the finalized PKGBUILD and a SHA256SUMS file.
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+  # The golden image tests are rendered on a GPU, which a hosted runner does not have.
+  HWGLANCE_SKIP_GOLDEN: "1"
+
+permissions:
+  contents: read
+
+jobs:
+  tarball:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The tag matches the workspace version
+        run: |
+          version="$(sed -n '/^\[workspace.package\]/,/^\[/{s/^version = "\(.*\)"/\1/p}' Cargo.toml)"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match the workspace version $version in Cargo.toml" >&2
+            exit 1
+          fi
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libxkbcommon-dev libwayland-dev libgl1-mesa-dev libegl1-mesa-dev \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      - name: Build the tarball
+        run: scripts/dist.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tarball
+          path: |
+            dist/hwglance-*-x86_64-linux.tar.gz
+            dist/hwglance-*-x86_64-linux.tar.gz.sha256
+          if-no-files-found: error
+
+  arch:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Install tools
+        run: |
+          pacman -Syu --noconfirm --needed git cargo pacman-contrib namcap
+          useradd --create-home builder
+
+      - uses: actions/checkout@v4
+
+      - name: Finalize the PKGBUILD
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          install -d -o builder -g builder /build
+          install -m644 -o builder -g builder packaging/arch/PKGBUILD packaging/arch/hwglance.install /build/
+          cd /build
+          sed -i "s/^pkgver=.*/pkgver=$version/; s/^pkgrel=.*/pkgrel=1/" PKGBUILD
+          # Downloads the GitHub tag archive and writes its checksum into sha256sums.
+          su builder -c updpkgsums
+          grep -E '^(pkgver|pkgrel|sha256sums)=' PKGBUILD
+
+      - name: Install the build and runtime dependencies
+        run: |
+          # makepkg checks them too; installing them here keeps makepkg itself unprivileged.
+          cd /build
+          bash -c 'source PKGBUILD && printf "%s\n" "${depends[@]}" "${makedepends[@]}"' \
+            | xargs pacman -S --noconfirm --needed
+
+      - name: Build the package
+        run: |
+          cd /build
+          su builder -c 'PKGDEST=/build/out makepkg --noconfirm'
+
+      - name: namcap (informational)
+        run: |
+          cd /build
+          namcap PKGBUILD || true
+          namcap out/hwglance-*.pkg.tar.zst || true
+          pacman -Qlp out/hwglance-*.pkg.tar.zst
+
+      - name: Collect the assets
+        run: |
+          mkdir -p arch-assets
+          cp /build/out/hwglance-*.pkg.tar.zst /build/PKGBUILD /build/hwglance.install arch-assets/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arch
+          path: arch-assets/*
+          if-no-files-found: error
+
+  release:
+    needs: [tarball, arch]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd assets
+          ls -l
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          notes=".github/release-notes/$GITHUB_REF_NAME.md"
+          if [ -f "$notes" ]; then
+            notes_args=(--notes-file "$notes")
+          else
+            notes_args=(--generate-notes)
+          fi
+          prerelease=()
+          case "$version" in *-*) prerelease=(--prerelease) ;; esac
+          gh release create "$GITHUB_REF_NAME" assets/* \
+            --verify-tag \
+            --title "HW Glance $version" \
+            "${notes_args[@]}" \
+            "${prerelease[@]}"
