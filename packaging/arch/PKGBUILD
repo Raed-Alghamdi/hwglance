@@ -1,0 +1,113 @@
+# Maintainer: Raed Alghamdi <raed-alghamdi@hotmail.com>
+#
+# HW Glance: every sensor on a Linux desktop and a Task Manager style process list.
+#
+# The committed sha256sums is 'SKIP'. The release workflow (.github/workflows/release.yml) sets
+# pkgver from the tag, runs updpkgsums and attaches the finalized PKGBUILD and hwglance.install
+# to the GitHub release. After each release, copy the sha256sums line from that PKGBUILD into this
+# file (and bump pkgver), so the committed copy, and the AUR package built from it, verify the
+# source. Build locally with: makepkg -s  (in a directory holding this PKGBUILD and hwglance.install).
+
+pkgname=hwglance
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Hardware sensors and a Task Manager style process list for Linux, with a collector service and an optional Omarchy bar widget'
+arch=(x86_64)
+url='https://github.com/Raed-Alghamdi/hwglance'
+# GPL-3.0-or-later: the program. MIT: the Omarchy bar widget. OFL-1.1 and Apache-2.0: the
+# bundled fonts and icon glyphs (see /usr/share/licenses/hwglance/fonts).
+license=('GPL-3.0-or-later' 'MIT' 'OFL-1.1' 'Apache-2.0')
+# The binaries link only glibc and libgcc. The window loads the rest at run time (dlopen), so
+# namcap cannot see them: Wayland and X11 windowing, EGL/GL, xkbcommon. fontconfig's fc-match
+# and fc-list pick the fonts, hwdata's pci.ids names the GPUs.
+depends=(
+  glibc
+  gcc-libs
+  fontconfig
+  hwdata
+  hicolor-icon-theme
+  libglvnd
+  libxkbcommon
+  libxkbcommon-x11
+  wayland
+  libx11
+  libxcb
+  libxcursor
+  libxi
+  libxrender
+)
+makedepends=(cargo)
+optdepends=(
+  'nvidia-utils: NVIDIA GPU readings (NVML)'
+  'lact: GPU hotspot and VRAM temperatures, fan RPM and core voltage'
+  'polkit: end other users'\'' processes'
+  'libnotify: notifications when a limit is crossed'
+  'hyprland: window titles in the process list'
+  'noto-fonts: Arabic window titles and process names'
+  'xdg-utils: open the limits file from the settings'
+  'glib2: follow the desktop light or dark theme (gdbus)'
+)
+install=hwglance.install
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release --workspace
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  # The unit tests of every crate. The render and golden-image tests under crates/hwglance/tests
+  # draw offscreen with wgpu and need a GPU (or a software Vulkan driver), which a build
+  # environment does not have, so they are left to the project's own CI and `scripts/check.sh`.
+  HWGLANCE_SKIP_GOLDEN=1 cargo test --frozen --release --workspace --lib --bins
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+
+  # Programs. The collector launches the window from the directory it sits in (/usr/bin).
+  install -Dm755 target/release/hwglance -t "$pkgdir/usr/bin"
+  install -Dm755 target/release/hwglanced -t "$pkgdir/usr/bin"
+  install -Dm755 packaging/hwglance-bar-widget -t "$pkgdir/usr/bin"
+  # The root helper is run by its system service only, so it stays out of PATH.
+  install -Dm755 target/release/hwglance-helper -t "$pkgdir/usr/lib/$pkgname"
+
+  # Services. Nothing is enabled here: see hwglance.install.
+  install -Dm644 packaging/hwglanced.service -t "$pkgdir/usr/lib/systemd/user"
+  install -Dm644 packaging/hwglance-helper.service -t "$pkgdir/usr/lib/systemd/system"
+
+  # Desktop entry and icons.
+  install -Dm644 packaging/hwglance.desktop -t "$pkgdir/usr/share/applications"
+  install -Dm644 packaging/hwglance.svg -t "$pkgdir/usr/share/icons/hicolor/scalable/apps"
+  install -Dm644 packaging/hwglance-symbolic.svg -t "$pkgdir/usr/share/icons/hicolor/symbolic/apps"
+  local png size
+  for png in packaging/icons/hicolor/*/apps/hwglance.png; do
+    size="$(basename "$(dirname "$(dirname "$png")")")"
+    install -Dm644 "$png" "$pkgdir/usr/share/icons/hicolor/$size/apps/hwglance.png"
+  done
+
+  # The Omarchy bar widget. Omarchy loads plugins only from ~/.config/omarchy/plugins, so
+  # `hwglance-bar-widget install` copies it from here.
+  install -d "$pkgdir/usr/share/$pkgname/omarchy-plugin"
+  cp -r omarchy-plugin/raed.hwglance "$pkgdir/usr/share/$pkgname/omarchy-plugin/"
+  find "$pkgdir/usr/share/$pkgname" -type d -exec chmod 755 {} +
+  find "$pkgdir/usr/share/$pkgname" -type f -exec chmod 644 {} +
+
+  # Documentation and licenses.
+  install -Dm644 README.md packaging/config.example.toml -t "$pkgdir/usr/share/doc/$pkgname"
+  install -Dm644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname"
+  install -Dm644 omarchy-plugin/raed.hwglance/LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE-MIT-omarchy-widget"
+  install -Dm644 crates/hwglance/assets/fonts/{README.md,OFL-*.txt,LICENSE-*.txt} -t "$pkgdir/usr/share/licenses/$pkgname/fonts"
+}

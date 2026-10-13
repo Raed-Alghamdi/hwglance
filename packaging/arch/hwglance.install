@@ -1,0 +1,33 @@
+post_install() {
+  cat <<'MSG'
+
+HW Glance is installed. Nothing is enabled yet. Run, as your normal user:
+
+  systemctl --user enable --now hwglanced
+
+Optional, for CPU package power and memory speed (they need root to read):
+
+  sudo systemctl enable --now hwglance-helper
+
+On the Omarchy desktop, add the bar widget:
+
+  hwglance-bar-widget install
+
+Then start HW Glance from your launcher or with `hwglance`.
+MSG
+}
+
+post_upgrade() {
+  cat <<'MSG'
+
+HW Glance was upgraded. To use the new version, run as your normal user:
+
+  systemctl --user restart hwglanced
+  hwglance-bar-widget update
+
+and, if you use the root helper:
+
+  sudo systemctl restart hwglance-helper
+
+MSG
+}

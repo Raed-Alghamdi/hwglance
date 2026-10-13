@@ -12,3 +12,4 @@ target/
 crates/hwglance/tests/snapshots/*.diff.png
 crates/hwglance/tests/snapshots/*.new.png
 crates/hwglance/tests/snapshots/*.old.png
+dist/
