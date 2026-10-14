@@ -107,6 +107,31 @@ pub fn close(ctx: &Context) {
     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
 }
 
+/// How the window came to close, for the journal line written on exit.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct CloseTrace {
+    /// The window's own Close button sent the close command.
+    pub button: bool,
+    /// A close request reached the window (from the button, or from outside).
+    pub requested: bool,
+}
+
+impl CloseTrace {
+    /// Note this frame's close request. Call every frame.
+    pub fn observe(&mut self, ctx: &Context) {
+        self.requested |= ctx.input(|i| i.viewport().close_requested());
+    }
+
+    /// The close reason, as one line for the journal.
+    pub fn reason(&self) -> &'static str {
+        match (self.button, self.requested) {
+            (true, _) => "closed by its own Close button",
+            (false, true) => "closed by a close request from the compositor or window manager (not the Close button)",
+            (false, false) => "event loop ended without a close request",
+        }
+    }
+}
+
 /// The name a control speaks and shows in its tooltip.
 pub fn control_name(control: Control, maximized: bool) -> &'static str {
     match control {
@@ -251,6 +276,15 @@ fn own_window() -> Result<Client, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn close_trace_tells_the_button_from_the_compositor() {
+        let reason = |button, requested| CloseTrace { button, requested }.reason();
+        assert!(reason(true, true).contains("Close button"));
+        assert!(reason(false, true).contains("compositor or window manager"));
+        assert!(reason(false, false).contains("without a close request"));
+        assert_ne!(reason(true, true), reason(false, true));
+    }
 
     #[test]
     fn maximize_says_restore_while_maximized_and_each_control_has_its_own_glyph() {

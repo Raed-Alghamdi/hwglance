@@ -326,6 +326,8 @@ pub struct App {
     pub(crate) sent_unfocused: bool,
     /// Maximize state of the window (the compositor's under Hyprland).
     win: winctl::Controls,
+    /// How the window was asked to close, logged when it exits.
+    close_trace: winctl::CloseTrace,
     /// Failed collector start or restart attempts already announced.
     seen_action_failures: u64,
 
@@ -500,6 +502,7 @@ impl App {
             starting_since: None,
             sent_unfocused: false,
             win: winctl::Controls::new(!opts.no_watchers),
+            close_trace: winctl::CloseTrace::default(),
             seen_action_failures: 0,
             edit_layout: false,
             scroll_to_reading: None,
@@ -2048,7 +2051,10 @@ impl App {
                         let ctx = ui.ctx().clone();
                         match winctl::show_group(ui, &pal, self.win.is_maximized(&ctx), gear.rect.size()) {
                             Some(winctl::Control::Maximize) => self.win.toggle_maximize(&ctx),
-                            Some(winctl::Control::Close) => winctl::close(&ctx),
+                            Some(winctl::Control::Close) => {
+                                self.close_trace.button = true;
+                                winctl::close(&ctx);
+                            }
                             None => {}
                         }
                     });
@@ -2404,11 +2410,13 @@ fn migrate_legacy(s: &mut Settings, old: LegacyState) {
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+        self.close_trace.observe(ui.ctx());
         self.show(ui);
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.flush_settings();
+        hwglance_proto::crash::note(&format!("exit: window {}", self.close_trace.reason()));
     }
 
     fn persist_egui_memory(&self) -> bool {

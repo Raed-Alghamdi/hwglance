@@ -16,6 +16,13 @@ path = "src/lib.rs"
 name = "hwglance"
 path = "src/main.rs"
 
+# The signal test sends real signals to a child of its own, so it runs on its own main thread
+# (the libtest harness has threads started before the test body can control them).
+[[test]]
+name = "signals"
+path = "tests/signals.rs"
+harness = false
+
 [dependencies]
 hwglance-proto = { path = "../hwglance-proto" }
 eframe = { version = "0.36", default-features = false, features = ["glow", "wayland", "x11", "persistence", "default_fonts", "accesskit"] }

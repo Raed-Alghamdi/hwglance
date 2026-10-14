@@ -153,6 +153,8 @@ The collector creates this file on first start with every reading that can have 
 
 If the window or the collector panics, HW Glance appends a report (time, version, thread, message, location, backtrace) to `~/.local/state/hwglance/crash.log` (`$XDG_STATE_HOME/hwglance/crash.log`; the file moves to `crash.log.1` past 256 KiB). The window also sends it to the journal: `journalctl --user -t hwglance`. The collector's panic is in its own log: `journalctl --user -u hwglanced`. Include the report in a bug report.
 
+The window also records the other ways it can end, under the journal tag `hwglance`: a startup or event-loop error and a SIGTERM, SIGINT, SIGHUP or SIGQUIT (with the sender's pid, uid and process name) are written to `crash.log` as well, and each start and each normal exit is one journal line (an exit says whether the window's own Close button or a close request from the compositor or window manager closed it). A window that disappears with none of these was ended by SIGKILL, which cannot be recorded, or crashed in a way that leaves a core dump (`coredumpctl`).
+
 ## Known limitations
 
 - Tested on real hardware on one desktop (AMD Ryzen, NVIDIA GPU, Omarchy on Hyprland). Intel CPUs and discrete AMD GPUs are covered only by tests with fake sysfs data. Other hardware, laptops especially, may show missing or oddly named readings. Bug reports with the output of `hwglanced --once --json` are welcome.

@@ -19,6 +19,7 @@ pub mod search;
 pub mod sensors;
 pub mod settings;
 pub mod settings_ui;
+pub mod signals;
 pub mod system_theme;
 pub mod text;
 pub mod theme;
