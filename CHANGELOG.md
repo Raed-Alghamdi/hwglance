@@ -12,6 +12,10 @@ All notable changes to HW Glance are listed here. The format follows [Keep a Cha
 
 - New default temperature limits, set from published ratings. CPU warning is now 4 °C below the CPU's limit (was 9). The integrated GPU gets limits too: the driver's, else the CPU's. NVIDIA core is 85 and 90 °C (was 80 and 88), hotspot 100 and 105 (was 95 and 105), VRAM and memory chips 90 and 95 (was 90 and 100), DIMMs 80 and 85 (was 60 and 75). Listed NVMe drives (Samsung 990 PRO, T-Force TM8FP5) take their datasheet rating of 70 °C for the Composite reading, with the warning 5 °C below. The ASUS EC's VRM reading gets 90 and 100 when the driver reports no limits. Limits you set yourself are not changed.
 
+### Fixed
+
+- On Wayland (seen on Hyprland with an NVIDIA GPU) the window could freeze and be offered for termination as "not responding" when it was out of view: on a workspace no monitor shows, or under a fullscreen or maximized window. A window that started on a hidden workspace froze on its second frame. The compositor stops sending frame callbacks to a window it is not showing, and the window waited for one inside a vsync buffer swap. The window now takes its pacing from the compositor's frame callbacks on Wayland (so the vsync setting of the toolkit has no effect there), keeps running its logic while no callbacks arrive, draws nothing, and paints again as soon as it is shown. The frame rate while visible is unchanged. This is [egui pull request 8631](https://github.com/emilk/egui/pull/8631), carried in `vendor/eframe` until egui 0.37 is released. X11 is unchanged.
+
 ## [0.1.1] - 2026-10-14
 
 ### Added

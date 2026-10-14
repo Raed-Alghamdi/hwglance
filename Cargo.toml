@@ -6,6 +6,9 @@ members = [
     "crates/hwglance",
     "crates/hwglance-helper",
 ]
+# vendor/ holds third-party source we patched: it is built as a dependency but is not ours to
+# test, format or lint, so `--workspace` leaves it out (see vendor/eframe/PATCHED.md).
+exclude = ["vendor"]
 
 [workspace.package]
 version = "0.1.1"
@@ -19,3 +22,9 @@ opt-level = 3
 lto = "thin"
 codegen-units = 4
 strip = true
+
+# eframe 0.36.2 plus egui PR #8631 (the window froze on Wayland when the compositor stopped its
+# frame callbacks). Every other egui crate stays on crates.io. Remove this section and
+# vendor/eframe when egui 0.37 is released: see vendor/eframe/PATCHED.md.
+[patch.crates-io]
+eframe = { path = "vendor/eframe" }
