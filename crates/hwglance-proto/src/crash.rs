@@ -1,10 +1,16 @@
-//! A panic hook that makes sure a panic leaves a trace.
+//! A panic hook that makes sure a panic leaves a trace, and the same writer for other ways a
+//! process can end.
 //!
 //! A panic normally prints to stderr only, and a window started from the desktop launcher has
 //! no stderr. [`install`] adds a hook that writes one report per panic to the crash log
 //! (`$XDG_STATE_HOME/hwglance/crash.log`, by default `~/.local/state/hwglance/crash.log`) and,
 //! when stderr is not already the journal, to the journal. The previous hook still runs
 //! afterwards, so the usual stderr message appears too.
+//!
+//! [`report`] writes a report for something that is not a panic (a startup error, a
+//! termination signal) the same way, and [`note`] sends one ordinary line to the journal. Both
+//! always go to the journal socket, whether or not stderr is the journal: nothing prints them
+//! to stderr, and the entry carries the identifier `hwglance` either way.
 //!
 //! Everything here is best effort: I/O errors are ignored and nothing in the hook may panic.
 
@@ -15,7 +21,7 @@ use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::os::unix::net::UnixDatagram;
 use std::panic::PanicHookInfo;
 use std::path::{Path, PathBuf};
-use std::sync::Once;
+use std::sync::{Once, OnceLock};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -25,8 +31,21 @@ const MAX_LOG_BYTES: u64 = 256 * 1024;
 /// (the crash log keeps it whole).
 const MAX_JOURNAL_BYTES: usize = 64 * 1024;
 const JOURNAL_SOCKET: &str = "/run/systemd/journal/socket";
+/// Journal priorities (syslog levels): a panic, a reported error, an ordinary line.
+const PRIO_CRIT: u8 = 2;
+const PRIO_ERR: u8 = 3;
+const PRIO_INFO: u8 = 6;
 
 static INSTALLED: Once = Once::new();
+/// Where [`report`] and [`note`] write, set by the first install.
+static EVENTS: OnceLock<Events> = OnceLock::new();
+
+struct Events {
+    app: &'static str,
+    dir: Option<PathBuf>,
+    journal: Option<PathBuf>,
+}
+
 /// Set while a report is being written, so a panic on another thread meanwhile is not written
 /// over it (the previous hook still prints it).
 static BUSY: AtomicBool = AtomicBool::new(false);
@@ -34,7 +53,14 @@ static BUSY: AtomicBool = AtomicBool::new(false);
 /// Install the hook for `app` (the name used in reports and as the journal identifier).
 /// Call it first thing in `main`. A second call does nothing.
 pub fn install(app: &'static str) {
-    install_to(app, state_dir(), journal_socket());
+    install_to(app, state_dir(), journal_socket(), Some(PathBuf::from(JOURNAL_SOCKET)));
+}
+
+/// Like [`install`], but with the crash log directory and the journal socket given (`None`
+/// leaves that destination out), for tests and tools that must not touch the real ones. The
+/// panic hook and [`report`] and [`note`] all use them.
+pub fn install_with(app: &'static str, dir: Option<PathBuf>, journal: Option<PathBuf>) {
+    install_to(app, dir, journal.clone(), journal);
 }
 
 /// The journal socket, unless stderr already goes to the journal (`JOURNAL_STREAM` is set, as
@@ -58,18 +84,81 @@ fn state_dir() -> Option<PathBuf> {
     Some(base.join("hwglance"))
 }
 
-fn install_to(app: &'static str, dir: Option<PathBuf>, journal: Option<PathBuf>) {
+fn install_to(
+    app: &'static str,
+    dir: Option<PathBuf>,
+    journal: Option<PathBuf>,
+    events_journal: Option<PathBuf>,
+) {
     INSTALLED.call_once(|| {
+        let _ = EVENTS.set(Events { app, dir: dir.clone(), journal: events_journal });
         let previous = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
             if !BUSY.swap(true, Ordering::Acquire) {
                 let report = build_report(app, info);
-                record(app, &report, dir.as_deref(), journal.as_deref());
+                record(app, &report, dir.as_deref(), journal.as_deref(), PRIO_CRIT);
                 BUSY.store(false, Ordering::Release);
             }
             previous(info);
         }));
     });
+}
+
+/// Write a report for an event that is not a panic to the crash log and the journal: a
+/// header line naming `kind`, the app, version and pid, then one `key: value` line per field.
+/// Does nothing before [`install`].
+pub fn report(kind: &str, fields: &[(&str, &str)]) {
+    if let Some(e) = EVENTS.get() {
+        let text = format_event(&Event {
+            unix_secs: now_secs(),
+            app: e.app,
+            version: env!("CARGO_PKG_VERSION"),
+            pid: std::process::id(),
+            kind,
+            fields,
+        });
+        record(e.app, &text, e.dir.as_deref(), e.journal.as_deref(), PRIO_ERR);
+    }
+}
+
+/// Send one ordinary line to the journal only (the crash log is for things that went wrong).
+/// Does nothing before [`install`].
+pub fn note(message: &str) {
+    if let Some(e) = EVENTS.get() {
+        record(e.app, message, None, e.journal.as_deref(), PRIO_INFO);
+    }
+}
+
+/// The name of process `pid` from `/proc/<pid>/comm`, if it can be read (it is gone, or the
+/// kernel hides it).
+pub fn process_name(pid: u32) -> Option<String> {
+    let raw = fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
+    let name = raw.trim_end_matches('\n');
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+struct Event<'a> {
+    unix_secs: u64,
+    app: &'a str,
+    version: &'a str,
+    pid: u32,
+    kind: &'a str,
+    fields: &'a [(&'a str, &'a str)],
+}
+
+fn format_event(e: &Event<'_>) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "==== {} {} at {} ====", e.app, e.kind, iso8601(e.unix_secs));
+    let _ = writeln!(out, "app: {} {}", e.app, e.version);
+    let _ = writeln!(out, "pid: {}", e.pid);
+    for (key, value) in e.fields {
+        let _ = writeln!(out, "{key}: {value}");
+    }
+    out
 }
 
 fn build_report(app: &str, info: &PanicHookInfo<'_>) -> String {
@@ -85,12 +174,8 @@ fn build_report(app: &str, info: &PanicHookInfo<'_>) -> String {
         .unwrap_or_else(|| "unknown".to_string());
     let thread = std::thread::current();
     let backtrace = std::backtrace::Backtrace::force_capture().to_string();
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
     format_report(&Fields {
-        unix_secs: now,
+        unix_secs: now_secs(),
         app,
         version: env!("CARGO_PKG_VERSION"),
         pid: std::process::id(),
@@ -148,12 +233,12 @@ fn iso8601(unix_secs: u64) -> String {
 
 /// Write the report to the crash log in `dir` and to the journal at `journal`, whichever are
 /// given. Errors are ignored: there is nowhere left to report them.
-fn record(app: &str, report: &str, dir: Option<&Path>, journal: Option<&Path>) {
+fn record(app: &str, report: &str, dir: Option<&Path>, journal: Option<&Path>, priority: u8) {
     if let Some(dir) = dir {
         let _ = write_crash_log(dir, report);
     }
     if let Some(socket) = journal {
-        let _ = send_journal(socket, app, report);
+        let _ = send_journal(socket, app, report, priority);
     }
 }
 
@@ -173,23 +258,23 @@ fn write_crash_log(dir: &Path, report: &str) -> io::Result<()> {
 
 /// One entry in the journal's native protocol. MESSAGE spans several lines, so it uses the
 /// binary form: the name, a newline, the length as 64 bits little endian, the data, a newline.
-fn journal_entry(app: &str, report: &str) -> Vec<u8> {
+fn journal_entry(app: &str, report: &str, priority: u8) -> Vec<u8> {
     let mut end = report.len().min(MAX_JOURNAL_BYTES);
     while !report.is_char_boundary(end) {
         end -= 1;
     }
     let message = &report.as_bytes()[..end];
     let mut out = Vec::with_capacity(message.len() + 96);
-    out.extend_from_slice(format!("SYSLOG_IDENTIFIER={}\nPRIORITY=2\nMESSAGE\n", app.replace('\n', " ")).as_bytes());
+    out.extend_from_slice(format!("SYSLOG_IDENTIFIER={}\nPRIORITY={priority}\nMESSAGE\n", app.replace('\n', " ")).as_bytes());
     out.extend_from_slice(&(message.len() as u64).to_le_bytes());
     out.extend_from_slice(message);
     out.push(b'\n');
     out
 }
 
-fn send_journal(socket: &Path, app: &str, report: &str) -> io::Result<()> {
+fn send_journal(socket: &Path, app: &str, report: &str, priority: u8) -> io::Result<()> {
     let sock = UnixDatagram::unbound()?;
-    sock.send_to(&journal_entry(app, report), socket).map(|_| ())
+    sock.send_to(&journal_entry(app, report, priority), socket).map(|_| ())
 }
 
 #[cfg(test)]
@@ -241,6 +326,28 @@ mod tests {
     }
 
     #[test]
+    fn event_report_has_a_header_and_every_field() {
+        let r = format_event(&Event {
+            unix_secs: 1_791_981_296,
+            app: "hwglance",
+            version: "0.1.0",
+            pid: 4242,
+            kind: "error",
+            fields: &[("error", "no display"), ("detail", "NoGlutinConfigs")],
+        });
+        assert_eq!(
+            r,
+            "==== hwglance error at 2026-10-14T12:34:56Z ====\napp: hwglance 0.1.0\npid: 4242\nerror: no display\ndetail: NoGlutinConfigs\n"
+        );
+    }
+
+    #[test]
+    fn process_name_reads_proc_comm() {
+        assert!(process_name(std::process::id()).is_some_and(|n| !n.is_empty()));
+        assert_eq!(process_name(u32::MAX), None);
+    }
+
+    #[test]
     fn crash_log_appends_and_rotates_past_256_kib() {
         let dir = scratch("rotate");
         write_crash_log(&dir, "first").unwrap();
@@ -276,7 +383,7 @@ mod tests {
 
     #[test]
     fn journal_entry_uses_the_binary_message_form() {
-        let e = journal_entry("hwglance", "line one\nline two\n");
+        let e = journal_entry("hwglance", "line one\nline two\n", PRIO_CRIT);
         let head = b"SYSLOG_IDENTIFIER=hwglance\nPRIORITY=2\nMESSAGE\n";
         assert!(e.starts_with(head));
         let rest = &e[head.len()..];
@@ -287,7 +394,7 @@ mod tests {
     #[test]
     fn journal_entry_cuts_long_reports_on_a_char_boundary() {
         let report = "é".repeat(MAX_JOURNAL_BYTES);
-        let e = journal_entry("x", &report);
+        let e = journal_entry("x", &report, PRIO_CRIT);
         let head = b"SYSLOG_IDENTIFIER=x\nPRIORITY=2\nMESSAGE\n".len();
         let len = u64::from_le_bytes(e[head..head + 8].try_into().unwrap()) as usize;
         assert!(len <= MAX_JOURNAL_BYTES);
@@ -300,10 +407,10 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("journal.sock");
         let server = UnixDatagram::bind(&path).unwrap();
-        record("hwglance", "report text", None, Some(&path));
+        record("hwglance", "report text", None, Some(&path), PRIO_INFO);
         let mut buf = [0u8; 4096];
         let n = server.recv(&mut buf).unwrap();
-        assert_eq!(&buf[..n], journal_entry("hwglance", "report text").as_slice());
+        assert_eq!(&buf[..n], journal_entry("hwglance", "report text", PRIO_INFO).as_slice());
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -312,7 +419,10 @@ mod tests {
     #[test]
     fn installed_hook_records_a_panic() {
         let dir = scratch("hook");
-        install_to("hwglance-test", Some(dir.clone()), None);
+        fs::create_dir_all(&dir).unwrap();
+        let sock_path = dir.join("journal.sock");
+        let server = UnixDatagram::bind(&sock_path).unwrap();
+        install_to("hwglance-test", Some(dir.clone()), None, Some(sock_path));
         let result = std::thread::Builder::new()
             .name("crash-test-thread".into())
             .spawn(|| {
@@ -331,6 +441,24 @@ mod tests {
         assert!(log.contains("location: crates/hwglance-proto/src/crash.rs:"));
         assert!(log.contains("message: non-string payload\n"));
         assert!(log.contains("backtrace:\n"));
+
+        // report goes to the crash log and the journal socket (even with the panic hook's own
+        // journal off), note to the journal only.
+        report("error", &[("error", "window failed")]);
+        note("started hwglance");
+        let log = fs::read_to_string(dir.join("crash.log")).unwrap();
+        assert!(log.contains("==== hwglance-test error at 20"), "{log}");
+        assert!(log.contains("error: window failed\n"));
+        assert!(!log.contains("started hwglance"));
+        let mut buf = [0u8; 4096];
+        let n = server.recv(&mut buf).unwrap();
+        let text = String::from_utf8_lossy(&buf[..n]).into_owned();
+        assert!(text.starts_with("SYSLOG_IDENTIFIER=hwglance-test\nPRIORITY=3\n"), "{text}");
+        assert!(text.contains("error: window failed"));
+        let n = server.recv(&mut buf).unwrap();
+        let text = String::from_utf8_lossy(&buf[..n]).into_owned();
+        assert!(text.starts_with("SYSLOG_IDENTIFIER=hwglance-test\nPRIORITY=6\n"), "{text}");
+        assert!(text.contains("started hwglance"));
         let _ = fs::remove_dir_all(&dir);
     }
 }
