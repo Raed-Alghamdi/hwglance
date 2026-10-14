@@ -10,6 +10,7 @@ All notable changes to HW Glance are listed here. The format follows [Keep a Cha
 - Dependency checks with `cargo-deny` (`deny.toml`): advisories, licenses, duplicate versions and sources. They run in CI on every push and weekly in `.github/workflows/audit.yml`.
 - Dependabot version updates for Cargo and GitHub Actions (monthly).
 - `SECURITY.md`, `MAINTAINING.md`, issue forms and a pull request template.
+- A panic now leaves a trace: the window and the collector write a report to `~/.local/state/hwglance/crash.log` (and the window to the journal), where before the message went to stderr only.
 
 ### Changed
 

@@ -148,6 +148,10 @@ The collector creates this file on first start with every reading that can have 
 - Nothing leaves your machine: no telemetry and no network code. The window and the bar widget talk to the collector over a Unix socket in `$XDG_RUNTIME_DIR`.
 - The collector runs as your user. Only the root helper runs as root: it reads the SMBIOS tables once and the RAPL energy counters every second, and publishes one-second averages (finer readings are what power side channels need). It has no network, child processes or other writes, and its systemd unit is sandboxed.
 
+## Troubleshooting
+
+If the window or the collector panics, HW Glance appends a report (time, version, thread, message, location, backtrace) to `~/.local/state/hwglance/crash.log` (`$XDG_STATE_HOME/hwglance/crash.log`; the file moves to `crash.log.1` past 256 KiB). The window also sends it to the journal: `journalctl --user -t hwglance`. The collector's panic is in its own log: `journalctl --user -u hwglanced`. Include the report in a bug report.
+
 ## Known limitations
 
 - Tested on real hardware on one desktop (AMD Ryzen, NVIDIA GPU, Omarchy on Hyprland). Intel CPUs and discrete AMD GPUs are covered only by tests with fake sysfs data. Other hardware, laptops especially, may show missing or oddly named readings. Bug reports with the output of `hwglanced --once --json` are welcome.

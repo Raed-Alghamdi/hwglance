@@ -23,6 +23,7 @@
 //! could not read, and the window changes limits with [`ClientMsg::SetThreshold`] and
 //! [`ClientMsg::ResetThreshold`] instead of writing a file itself.
 
+pub mod crash;
 pub mod crossings;
 
 use serde::de::DeserializeOwned;

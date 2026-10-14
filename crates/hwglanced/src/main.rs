@@ -69,6 +69,7 @@ const USAGE: &str = "usage: hwglanced [--once [--procs] [--json]] [--version]\n\
   --bench-history MINUTES   measure the memory and CPU cost of recording every reading for MINUTES";
 
 fn main() {
+    hwglance_proto::crash::install("hwglanced");
     let mut once = false;
     let mut procs = false;
     let mut json = false;

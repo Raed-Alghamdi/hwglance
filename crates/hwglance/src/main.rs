@@ -6,6 +6,7 @@ fn usage() -> ! {
 }
 
 fn main() -> eframe::Result {
+    hwglance_proto::crash::install("hwglance");
     let mut mode = Mode::Live;
     let mut opts = Opts::default();
     let mut args = std::env::args().skip(1);
