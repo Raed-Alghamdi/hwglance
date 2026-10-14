@@ -4,6 +4,8 @@ All notable changes to HW Glance are listed here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-14
+
 ### Added
 
 - `hwglance --version` (the collector already had it).
@@ -16,6 +18,7 @@ All notable changes to HW Glance are listed here. The format follows [Keep a Cha
 
 - GitHub Actions are pinned to commit SHAs, on Node 24 versions. Workflows run with read-only permissions, and CI cancels superseded runs.
 - The workspace crates are marked `publish = false`.
+- Updated the `toml` crate to 1.1.
 
 ### Security
 
@@ -33,5 +36,6 @@ First release.
 - Sensors are read only, and nothing leaves your machine.
 - Packages: an Arch package and a generic x86_64 Linux tarball.
 
-[Unreleased]: https://github.com/Raed-Alghamdi/hwglance/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Raed-Alghamdi/hwglance/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/Raed-Alghamdi/hwglance/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Raed-Alghamdi/hwglance/releases/tag/v0.1.0
