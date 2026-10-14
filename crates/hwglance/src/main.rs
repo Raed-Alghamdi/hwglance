@@ -1,7 +1,7 @@
 use hwglance::app::{App, Mode, Opts};
 
 fn usage() -> ! {
-    eprintln!("usage: hwglance [--demo | --mock <snapshot.json>] [--settings] [--focus <reading id>]");
+    eprintln!("usage: hwglance [--demo | --mock <snapshot.json>] [--settings] [--focus <reading id>] [--version]");
     std::process::exit(2);
 }
 
@@ -14,6 +14,10 @@ fn main() -> eframe::Result {
             "--demo" => mode = Mode::Demo,
             "--mock" => mode = Mode::Mock(args.next().unwrap_or_else(|| usage()).into()),
             "--settings" => opts.open_settings = true,
+            "--version" | "-V" => {
+                println!("hwglance {}", env!("CARGO_PKG_VERSION"));
+                return Ok(());
+            }
             "--focus" => opts.focus = Some(args.next().unwrap_or_else(|| usage())),
             _ => usage(),
         }

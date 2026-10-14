@@ -1,0 +1,64 @@
+name: Bug report
+description: Something is wrong, missing or crashes
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Wrong or missing sensor readings are the most useful reports, because I could only test on one machine. Security problems go through the "Report a security vulnerability" link instead.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. Start the window\n2. ..."
+  - type: input
+    id: system
+    attributes:
+      label: Distro and desktop
+      placeholder: Arch Linux, Hyprland (Omarchy)
+    validations:
+      required: true
+  - type: input
+    id: hardware
+    attributes:
+      label: CPU and GPU
+      placeholder: AMD Ryzen 7 5800X, NVIDIA RTX 3070
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: HW Glance version
+      description: Run `hwglance --version`.
+      placeholder: hwglance 0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install it?
+      options:
+        - Arch package
+        - Tarball
+        - From source
+    validations:
+      required: true
+  - type: textarea
+    id: collector
+    attributes:
+      label: Collector output
+      description: |
+        Paste the output of `hwglanced --once --json`. It lists your hardware and readings, so remove anything private (for example the computer name or disk labels) before you post it.
+      render: json

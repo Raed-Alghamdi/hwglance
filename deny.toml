@@ -1,0 +1,45 @@
+# cargo-deny policy. Run it with: cargo deny check
+# Docs: https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+# Only the platform we ship for, so Windows-only and macOS-only crates are not checked.
+targets = ["x86_64-unknown-linux-gnu"]
+
+[advisories]
+# Known vulnerabilities always fail the check. Unmaintained and unsound crates warn.
+unmaintained = "all"
+unsound = "all"
+yanked = "deny"
+
+[licenses]
+# The project is GPL-3.0-or-later, so every dependency must be compatible with it.
+# This is exactly the set the dependency tree uses today. When a new dependency brings another
+# license, check that it is GPL-3.0 compatible, then add it here with a short comment.
+confidence-threshold = 0.9
+allow = [
+    # The four workspace crates themselves.
+    "GPL-3.0-or-later",
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "0BSD",
+    "Unicode-3.0",
+    "Unlicense",
+    "OFL-1.1", # fonts inside epaint_default_fonts
+    "Ubuntu-font-1.0", # fonts inside epaint_default_fonts
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# The workspace crates depend on each other by path, which has no version number.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

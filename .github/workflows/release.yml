@@ -19,7 +19,9 @@ jobs:
   tarball:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: The tag matches the workspace version
         run: |
@@ -36,9 +38,11 @@ jobs:
             pkg-config libxkbcommon-dev libwayland-dev libgl1-mesa-dev libegl1-mesa-dev \
             libx11-dev libxcursor-dev libxrandr-dev libxi-dev
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable branch
+        with:
+          toolchain: stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Test
         run: cargo test --workspace --locked
@@ -46,7 +50,7 @@ jobs:
       - name: Build the tarball
         run: scripts/dist.sh
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: tarball
           path: |
@@ -63,7 +67,9 @@ jobs:
           pacman -Syu --noconfirm --needed git cargo pacman-contrib namcap
           useradd --create-home builder
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Finalize the PKGBUILD
         run: |
@@ -100,7 +106,7 @@ jobs:
           mkdir -p arch-assets
           cp /build/out/hwglance-*.pkg.tar.zst /build/PKGBUILD /build/hwglance.install arch-assets/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: arch
           path: arch-assets/*
@@ -112,9 +118,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: assets
           merge-multiple: true

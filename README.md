@@ -164,10 +164,14 @@ cargo run -p hwglanced -- --once --json   # one sample from the collector
 scripts/check.sh                          # tests, clippy, bar widget model checks (needs Node.js)
 ```
 
-- Pass `scripts/check.sh` before a pull request.
+- Pass `scripts/check.sh` before a pull request, and add a line to the "Unreleased" section of [`CHANGELOG.md`](CHANGELOG.md).
 - The golden image tests in `crates/hwglance/tests/snapshots/` are rendered on a GPU. After an intended UI change, run `UPDATE_SNAPSHOTS=1 cargo test -p hwglance --test snapshots` and review the PNG diff. `HWGLANCE_SKIP_GOLDEN=1` skips the comparison without a usable GPU.
 - `scripts/readme-shots.sh` regenerates the README screenshots from demo data.
 - [`PRODUCT.md`](PRODUCT.md) says who the app is for, [`DESIGN.md`](DESIGN.md) describes the visual system, and [`CLAUDE.md`](CLAUDE.md) has notes for AI coding agents.
+
+## Support and security
+
+HW Glance is a hobby project maintained by one person in spare time. Bugs and ideas go in [issues](https://github.com/Raed-Alghamdi/hwglance/issues); replies may take a few days. Report security problems privately, as described in [`SECURITY.md`](SECURITY.md). Maintainer notes are in [`MAINTAINING.md`](MAINTAINING.md).
 
 ## License
 
