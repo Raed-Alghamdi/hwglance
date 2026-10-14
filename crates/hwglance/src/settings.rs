@@ -6,7 +6,6 @@
 //! Every object keeps unknown keys (`extra`), so new fields added by other tools survive a
 //! round trip, and ids of sensors that no longer exist are never dropped.
 
-use crate::visibility;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
@@ -668,7 +667,7 @@ pub fn spawn_watcher(ctx: egui::Context, path: PathBuf, flag: Arc<AtomicBool>) {
                 if now != last {
                     last = now;
                     flag.store(true, Ordering::Relaxed);
-                    visibility::repaint(&ctx);
+                    ctx.request_repaint();
                 }
             }
         })

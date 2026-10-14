@@ -13,7 +13,6 @@ use crate::fonts::{self, FontChoice};
 use crate::history::{self, PopInput};
 use crate::system_theme::{self, SystemLight};
 use crate::theme::{self, base, fs, Palette, ThemeChoice};
-use crate::visibility;
 use crate::winctl;
 use crate::ui_kit::{self, f_label, f_label_bold, f_small, f_title, icon, Device, ResetButton, UndoOffer};
 use crate::sensors::{self, DeviceState, Hit, ViewOut};
@@ -329,8 +328,6 @@ pub struct App {
     win: winctl::Controls,
     /// How the window was asked to close, logged when it exits.
     close_trace: winctl::CloseTrace,
-    /// Animations are off because the window is hidden (see `calm_while_hidden`).
-    calm: bool,
     /// Failed collector start or restart attempts already announced.
     seen_action_failures: u64,
 
@@ -430,7 +427,6 @@ impl App {
         let external_change = Arc::new(AtomicBool::new(false));
         if !opts.no_watchers {
             settings::spawn_watcher(ctx.clone(), settings_path.clone(), external_change.clone());
-            visibility::spawn(ctx.clone());
         }
 
         let link = Link::new();
@@ -507,7 +503,6 @@ impl App {
             sent_unfocused: false,
             win: winctl::Controls::new(!opts.no_watchers),
             close_trace: winctl::CloseTrace::default(),
-            calm: false,
             seen_action_failures: 0,
             edit_layout: false,
             scroll_to_reading: None,
@@ -594,14 +589,14 @@ impl App {
                     }
                 }
             } else {
-                visibility::repaint_after(ctx, due - now + Duration::from_millis(20));
+                ctx.request_repaint_after(due - now + Duration::from_millis(20));
             }
         }
         let scheme = ThemeChoice::parse(&self.s.appearance.theme).resolve(system_theme::scheme_of(&self.system_light));
         if scheme != self.pal.scheme {
             self.pal = Palette::for_scheme(scheme);
             Palette::apply(scheme, ctx);
-            visibility::repaint(ctx);
+            ctx.request_repaint();
         }
         let choice = FontChoice::parse(&self.s.appearance.font);
         if choice != self.applied_font {
@@ -716,7 +711,7 @@ impl App {
             self.edit_layout = false;
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         }
-        visibility::repaint(ctx);
+        ctx.request_repaint();
     }
 
     /// Bring a reading into view without pinning its popover: expand its card and section,
@@ -726,7 +721,7 @@ impl App {
         if sensors::reveal(&mut self.s, &snap, id) {
             self.scroll_to_reading = Some(id.to_string());
             self.flash = Some((id.to_string(), Instant::now()));
-            visibility::repaint(&self.ctx);
+            self.ctx.request_repaint();
         }
     }
 
@@ -857,7 +852,7 @@ impl App {
             since: Instant::now(),
             message: None,
         });
-        visibility::repaint(&self.ctx);
+        self.ctx.request_repaint();
     }
 
     /// Follow the processes of the last kill: ended, still running after the check window, or
@@ -880,14 +875,14 @@ impl App {
                     w.state = KillState::StillRunning;
                     w.since = Instant::now();
                 }
-                visibility::repaint_after(ctx, Duration::from_millis(150));
+                ctx.request_repaint_after(Duration::from_millis(150));
             }
             KillState::Ended | KillState::StillRunning | KillState::Failed => {
                 let shown = w.since.elapsed();
                 if shown >= show_for {
                     self.kill_watch = None;
                 } else {
-                    visibility::repaint_after(ctx, show_for - shown + Duration::from_millis(30));
+                    ctx.request_repaint_after(show_for - shown + Duration::from_millis(30));
                 }
             }
         }
@@ -1001,7 +996,7 @@ impl App {
             })
             .min();
         if let Some(wait) = next {
-            visibility::repaint_after(ctx, wait + Duration::from_millis(30));
+            ctx.request_repaint_after(wait + Duration::from_millis(30));
         }
     }
 
@@ -1615,7 +1610,7 @@ impl App {
             if btn.on_hover_text("systemctl --user start hwglanced").clicked() {
                 conn::start_collector(&self.link, ui.ctx());
                 self.starting_since = Some(Instant::now());
-                visibility::repaint_after(ui.ctx(), Duration::from_secs(4));
+                ui.ctx().request_repaint_after(Duration::from_secs(4));
             }
         });
     }
@@ -1724,7 +1719,7 @@ impl App {
             });
         });
         if flash.is_some() {
-            visibility::repaint(ui.ctx());
+            ui.ctx().request_repaint();
         }
         if out.stop_editing {
             self.edit_layout = false;
@@ -1780,12 +1775,12 @@ impl App {
                     if waited >= HOVER_DELAY {
                         self.hover_pop = Some(h);
                     } else {
-                        visibility::repaint_after(ctx, HOVER_DELAY - waited + Duration::from_millis(10));
+                        ctx.request_repaint_after(HOVER_DELAY - waited + Duration::from_millis(10));
                     }
                 } else {
                     self.hover_candidate = Some((h.id.clone(), Instant::now()));
                     self.hover_pop = None;
-                    visibility::repaint_after(ctx, HOVER_DELAY + Duration::from_millis(10));
+                    ctx.request_repaint_after(HOVER_DELAY + Duration::from_millis(10));
                 }
             }
             None => {
@@ -1831,7 +1826,7 @@ impl App {
         };
         self.link.request_history(&hit.id, minutes * 60, every);
         self.pop_id = Some(hit.id.clone());
-        visibility::repaint_after(ctx, Duration::from_secs(2));
+        ctx.request_repaint_after(Duration::from_secs(2));
         let series = self.link.history_of(&hit.id).map(|(s, _)| s);
         let now_ms = self.snap.as_ref().map(|s| s.unix_ms).unwrap_or(0);
         let screen = ctx.content_rect();
@@ -2119,7 +2114,7 @@ impl App {
         if retry {
             let now = Instant::now();
             self.dirty_since = Some(now.checked_sub(SAVE_DEBOUNCE).unwrap_or(now));
-            visibility::repaint(ui.ctx());
+            ui.ctx().request_repaint();
         }
     }
 
@@ -2374,37 +2369,24 @@ impl App {
         }
     }
 
-    /// A frame can still be painted while the window is hidden (an event from the compositor
-    /// forces one), and one more would block on the buffer swap. egui asks for the next frame
-    /// itself while something animates, so animations are switched off for as long as the window
-    /// is hidden: a forced frame then ends the chain.
-    fn calm_while_hidden(&mut self, ctx: &egui::Context) {
-        let calm = !visibility::shown();
-        if calm != self.calm {
-            self.calm = calm;
-            let time = if calm { 0.0 } else { egui::Style::default().animation_time };
-            ctx.all_styles_mut(|style| style.animation_time = time);
-        }
-    }
-
     fn schedule_repaints(&mut self, ctx: &egui::Context, stale: bool) {
         // Wake exactly when the data turns stale; while stale keep the age readout moving.
         if stale {
-            visibility::repaint_after(ctx, Duration::from_secs(1));
+            ctx.request_repaint_after(Duration::from_secs(1));
         } else {
             let s = self.link.lock();
             if !s.never_stale {
                 if let (Some(snap), Some(at)) = (&s.snapshot, s.received) {
                     let limit = Duration::from_millis(snap.interval_ms as u64 * 3);
                     let left = limit.saturating_sub(at.elapsed()) + Duration::from_millis(30);
-                    visibility::repaint_after(ctx, left);
+                    ctx.request_repaint_after(left);
                 }
             }
         }
         if let Some(t) = &self.toast {
             let now = Instant::now();
             if now < t.until {
-                visibility::repaint_after(ctx, t.until - now + Duration::from_millis(30));
+                ctx.request_repaint_after(t.until - now + Duration::from_millis(30));
             } else {
                 self.toast = None;
             }
@@ -2429,7 +2411,6 @@ fn migrate_legacy(s: &mut Settings, old: LegacyState) {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         self.close_trace.observe(ui.ctx());
-        self.calm_while_hidden(ui.ctx());
         self.show(ui);
     }
 

@@ -1,7 +1,6 @@
 //! Connection to the collector daemon (background thread), plus the shared snapshot slot
 //! that the demo and mock sources publish into as well.
 
-use crate::visibility;
 use hwglance_proto::{self as proto, ClientMsg, DaemonMsg, HistorySeries, Snapshot};
 use std::collections::HashMap;
 use std::io::BufReader;
@@ -77,7 +76,7 @@ impl Link {
             s.connected = true;
             s.unreadable = false;
         }
-        visibility::repaint(ctx);
+        ctx.request_repaint();
     }
 
     /// Store a history reply and wake the UI.
@@ -88,7 +87,7 @@ impl Link {
                 s.history.insert(h.id.clone(), (Instant::now(), Arc::new(h)));
             }
         }
-        visibility::repaint(ctx);
+        ctx.request_repaint();
     }
 
     /// The newest history of a reading and how old it is.
@@ -190,7 +189,7 @@ pub fn spawn_socket(ctx: egui::Context, link: Link) {
                         s.connect_failed = true;
                         s.last_error = Some("The connection to the collector broke unexpectedly. Reconnecting.".to_string());
                         drop(s);
-                        visibility::repaint(&ctx);
+                        ctx.request_repaint();
                     }
                 }
                 Err(e) => {
@@ -201,7 +200,7 @@ pub fn spawn_socket(ctx: egui::Context, link: Link) {
                         s.connected = false;
                         s.last_error = Some(reason);
                         drop(s);
-                        visibility::repaint(&ctx);
+                        ctx.request_repaint();
                     }
                 }
             }
@@ -241,7 +240,7 @@ fn session(ctx: &egui::Context, link: &Link, stream: UnixStream) {
         s.action_error = None;
         s.unreadable = false;
     }
-    visibility::repaint(ctx);
+    ctx.request_repaint();
 
     let mut reader = BufReader::new(stream);
     let mut buf = String::new();
@@ -257,11 +256,11 @@ fn session(ctx: &egui::Context, link: &Link, stream: UnixStream) {
             Ok(Some(DaemonMsg::History { series })) => link.publish_history(ctx, series),
             Ok(Some(DaemonMsg::Focus { id })) => {
                 link.lock().focus = Some(id);
-                visibility::repaint(ctx);
+                ctx.request_repaint();
             }
             Ok(Some(DaemonMsg::Error { message })) => {
                 link.lock().last_error = Some(message);
-                visibility::repaint(ctx);
+                ctx.request_repaint();
             }
             Ok(None) => break,
             Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
@@ -269,7 +268,7 @@ fn session(ctx: &egui::Context, link: &Link, stream: UnixStream) {
                 unreadable += 1;
                 if unreadable == UNREADABLE_RUN {
                     link.lock().unreadable = true;
-                    visibility::repaint(ctx);
+                    ctx.request_repaint();
                 }
             }
             Err(_) => break,
@@ -281,7 +280,7 @@ fn session(ctx: &egui::Context, link: &Link, stream: UnixStream) {
         s.connected = false;
         s.connect_failed = true;
     }
-    visibility::repaint(ctx);
+    ctx.request_repaint();
 }
 
 /// What the collector sends once per process (slim subscription): the command line and the other
@@ -402,7 +401,7 @@ fn run_unit_action(link: &Link, ctx: &egui::Context, verb: &'static str) {
             s.action_error = Some(format!("Could not {verb} the collector: {e}"));
             s.action_failures += 1;
         }
-        visibility::repaint(&ctx);
+        ctx.request_repaint();
     });
 }
 

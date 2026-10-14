@@ -1,7 +1,6 @@
 //! Ending processes: `libc::kill` for our own pids, `pkexec kill` for other users' pids.
 
 use crate::model::{Target, TargetProc};
-use crate::visibility;
 use std::sync::mpsc::Sender;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -191,7 +190,7 @@ pub fn execute(target: &Target, sig: Signal, tx: Sender<(String, bool)>, ctx: eg
                 Err(e) => (format!("Could not run pkexec: {e}"), false),
             };
             let _ = tx.send((msg, ok));
-            visibility::repaint(&ctx);
+            ctx.request_repaint();
         });
     }
 

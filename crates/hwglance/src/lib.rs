@@ -25,5 +25,4 @@ pub mod text;
 pub mod theme;
 pub mod thresholds;
 pub mod ui_kit;
-pub mod visibility;
 pub mod winctl;

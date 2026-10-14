@@ -11,7 +11,6 @@
 use crate::a11y::{self, Ring, Spoken};
 use crate::theme::{self, base, Palette};
 use crate::ui_kit;
-use crate::visibility;
 use egui::{vec2, Align2, Context, Sense, Ui};
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
@@ -89,7 +88,7 @@ impl Controls {
                 maximized.store(now, Ordering::Relaxed);
             }
             busy.store(false, Ordering::Release);
-            visibility::repaint(&ctx);
+            ctx.request_repaint();
         });
     }
 }
@@ -211,19 +210,12 @@ pub fn show_group(ui: &mut Ui, pal: &Palette, maximized: bool, size: egui::Vec2)
 
 /// What is needed of a window of Hyprland's `j/clients`.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Client {
-    pub(crate) address: String,
-    pub(crate) pid: u32,
-    pub(crate) class: String,
+struct Client {
+    address: String,
+    pid: u32,
+    class: String,
     /// `fullscreen` of `j/clients`: 0 none, 1 maximized, 2 fullscreen, 3 both.
-    pub(crate) fullscreen: u8,
-    /// Id of the workspace the window is on (a special workspace has a negative one), if the
-    /// compositor said.
-    pub(crate) workspace: Option<i64>,
-    pub(crate) floating: bool,
-    pub(crate) pinned: bool,
-    /// Not drawn at all: minimized, or behind the front tab of a group.
-    pub(crate) hidden: bool,
+    fullscreen: u8,
 }
 
 impl Client {
@@ -232,13 +224,8 @@ impl Client {
     }
 }
 
-/// A boolean field that is false when absent.
-fn flag(v: &serde_json::Value, key: &str) -> bool {
-    v.get(key).and_then(|x| x.as_bool()).unwrap_or(false)
-}
-
 /// The windows of `j/clients`; entries it cannot read are skipped.
-pub(crate) fn parse_clients(json: &str) -> Vec<Client> {
+fn parse_clients(json: &str) -> Vec<Client> {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else { return Vec::new() };
     v.as_array()
         .map(|a| {
@@ -249,10 +236,6 @@ pub(crate) fn parse_clients(json: &str) -> Vec<Client> {
                         pid: u32::try_from(c.get("pid")?.as_u64()?).ok()?,
                         class: c.get("class").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
                         fullscreen: u8::try_from(c.get("fullscreen")?.as_u64()?).ok()?,
-                        workspace: c.get("workspace").and_then(|w| w.get("id")).and_then(|x| x.as_i64()),
-                        floating: flag(c, "floating"),
-                        pinned: flag(c, "pinned"),
-                        hidden: flag(c, "hidden"),
                     })
                 })
                 .collect()
@@ -261,27 +244,21 @@ pub(crate) fn parse_clients(json: &str) -> Vec<Client> {
 }
 
 /// This process's window: the one of its pid, the main window ("hwglance" class) first.
-pub(crate) fn own_client(clients: &[Client], pid: u32) -> Option<&Client> {
+fn own_client(clients: &[Client], pid: u32) -> Option<&Client> {
     let mine = || clients.iter().filter(|c| c.pid == pid);
     mine().find(|c| c.class == "hwglance").or_else(|| mine().next())
 }
 
-/// A socket of this Hyprland session: `.socket.sock` takes commands and queries, `.socket2.sock`
-/// streams events.
-fn hypr_socket(name: &str) -> Option<PathBuf> {
+/// Hyprland's command socket for this session.
+fn hypr_socket() -> Option<PathBuf> {
     let runtime = std::env::var_os("XDG_RUNTIME_DIR")?;
     let sig = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").filter(|v| !v.is_empty())?;
-    Some(PathBuf::from(runtime).join("hypr").join(sig).join(name))
-}
-
-/// The socket that streams Hyprland's events, one `name>>data` line each.
-pub(crate) fn hypr_event_socket() -> Option<PathBuf> {
-    hypr_socket(".socket2.sock")
+    Some(PathBuf::from(runtime).join("hypr").join(sig).join(".socket.sock"))
 }
 
 /// Ask Hyprland one query on its socket (`hyprctl` does the same) and return its answer.
-pub(crate) fn hypr_query(request: &str) -> Result<String, String> {
-    let sock = hypr_socket(".socket.sock").ok_or("no Hyprland socket")?;
+fn hypr_query(request: &str) -> Result<String, String> {
+    let sock = hypr_socket().ok_or("no Hyprland socket")?;
     let mut s = UnixStream::connect(&sock).map_err(|e| format!("Hyprland socket: {e}"))?;
     s.set_read_timeout(Some(HYPR_TIMEOUT)).ok();
     s.set_write_timeout(Some(HYPR_TIMEOUT)).ok();

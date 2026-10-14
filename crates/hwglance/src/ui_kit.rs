@@ -2,7 +2,6 @@
 //! split of a formatted value into its number and unit.
 
 use crate::fonts;
-use crate::visibility;
 use crate::theme::{base, Palette};
 use egui::{Color32, FontFamily, FontId};
 use hwglance_proto::{format_value, Reading, Unit};
@@ -439,7 +438,7 @@ pub fn right_cluster<R>(ui: &mut egui::Ui, mut add: impl FnMut(&mut egui::Ui) ->
     if known.is_none() || (w - prev).abs() > 0.5 {
         ui.ctx().data_mut(|d| d.insert_temp(key, w));
         if known.is_some() {
-            visibility::repaint(ui.ctx());
+            ui.ctx().request_repaint();
         }
     }
     r
