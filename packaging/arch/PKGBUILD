@@ -9,7 +9,7 @@
 # source. Build locally with: makepkg -s  (in a directory holding this PKGBUILD and hwglance.install).
 
 pkgname=hwglance
-pkgver=0.1.0
+pkgver=0.1.1
 pkgrel=1
 pkgdesc='Hardware sensors and a Task Manager style process list for Linux, with a collector service and an optional Omarchy bar widget'
 arch=(x86_64)
@@ -51,7 +51,7 @@ optdepends=(
 )
 install=hwglance.install
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('2159eca302213c3a9e3b674dd226449f2ca94b53a7923f3455f7dac8db815888')
+sha256sums=('a35ba1a7d7177cfb233a8cdc4f249cd36fbadce1ce4b1a20d064b5d864db0518')
 
 prepare() {
   cd "$pkgname-$pkgver"
