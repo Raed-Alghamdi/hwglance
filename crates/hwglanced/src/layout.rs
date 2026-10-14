@@ -304,7 +304,7 @@ fn cpu_group(i: &Inputs) -> SensorGroup {
 
     let sensor = cpu_sensor(i);
     let limit = cpu_limit(i, sensor);
-    let warn = limit - 9.0;
+    let warn = limit - 4.0;
     let mut temps = Vec::new();
     // AMD: k10temp
     let k10 = chips_named(i.chips, "k10temp").next();
@@ -441,7 +441,7 @@ fn gpu_group(i: &Inputs) -> Option<SensorGroup> {
         rd("gpu0/load/dec", "Video decoder", Unit::Percent, g.dec_pct),
     ];
     let temps = vec![
-        rd("gpu0/temp/core", "Core", Unit::Celsius, g.temp_c).thr(80.0, 88.0),
+        rd("gpu0/temp/core", "Core", Unit::Celsius, g.temp_c).thr(85.0, 90.0),
         rd(
             "gpu0/temp/hotspot",
             "Hotspot",
@@ -449,7 +449,7 @@ fn gpu_group(i: &Inputs) -> Option<SensorGroup> {
             l.and_then(|l| l.hotspot_c),
         )
         .note("LACT (NVAPI)")
-        .thr(95.0, 105.0),
+        .thr(100.0, 105.0),
         rd(
             "gpu0/temp/vram",
             "VRAM",
@@ -457,7 +457,7 @@ fn gpu_group(i: &Inputs) -> Option<SensorGroup> {
             l.and_then(|l| l.vram_c),
         )
         .note(&lact_note("memory junction"))
-        .thr(90.0, 100.0),
+        .thr(90.0, 95.0),
     ];
     let mut thermal = flag(
         "gpu0/throttle/thermal",
@@ -484,7 +484,7 @@ fn gpu_group(i: &Inputs) -> Option<SensorGroup> {
                         Unit::Celsius,
                         Some(*v),
                     )
-                    .thr(90.0, 100.0)
+                    .thr(90.0, 95.0)
                 })
                 .collect()
         })
@@ -628,7 +628,7 @@ fn memory_group(i: &Inputs) -> SensorGroup {
                     t.value,
                 )
                 .note(&format!("spd5118 at {}", c.dev))
-                .thr(60.0, 75.0),
+                .thr(80.0, 85.0),
             )
         })
         .collect();
@@ -717,15 +717,20 @@ fn disk_groups(i: &Inputs) -> Vec<SensorGroup> {
                 .as_ref()
                 .and_then(|c| chips_named(i.chips, "nvme").find(|ch| &ch.dev == c));
             if let Some(chip) = chip {
+                let rated = crate::disks::nvme_rated_max_c(&d.model);
                 let readings = chip
                     .temps
                     .iter()
                     .map(|t| {
-                        let warn = t.max.filter(|m| (30.0..=100.0).contains(m)).unwrap_or(70.0);
-                        let crit = t
+                        let mut warn = t.max.filter(|m| (30.0..=100.0).contains(m)).unwrap_or(70.0);
+                        let mut crit = t
                             .crit
                             .filter(|c| (50.0..=110.0).contains(c))
                             .unwrap_or(80.0);
+                        // The drive's datasheet rating beats the generic rule on its Composite reading
+                        if let Some(rated) = rated.filter(|_| slug(&t.label) == "composite") {
+                            (warn, crit) = (rated - 5.0, rated);
+                        }
                         rd(
                             format!("{base}/temp/{}", slug(&t.label)),
                             t.label.clone(),
@@ -780,6 +785,11 @@ fn board_temp(
     );
     r.warn = t.max.filter(|m| (30.0..=100.0).contains(m));
     r.crit = t.crit.filter(|c| (50.0..=110.0).contains(c));
+    // ASUS publishes no VRM limit and the board's thermistor reads below the power stages'
+    // junction, so the EC's VRM reading gets generic limits when its driver reports none.
+    if chip == "asusec" && t.label == "VRM" && r.warn.is_none() && r.crit.is_none() {
+        r = r.thr(90.0, 100.0);
+    }
     Some(r)
 }
 
@@ -891,7 +901,15 @@ fn igpu_group(i: &Inputs) -> Option<SensorGroup> {
     let g = i.gpus.iter().find(|g| g.card == "igpu")?;
     let mut readings = Vec::new();
     if let Some(t) = g.edge {
-        readings.push(rd("igpu/main/temp", "Edge temperature", Unit::Celsius, t.value));
+        // The driver's limit when it reports one; else the CPU's, because the graphics sit in
+        // the CPU package and have no rating of their own.
+        if let Some(mut r) = gpu_temp("igpu/main/temp".into(), "Edge temperature", Some(t)) {
+            if r.crit.is_none() {
+                let limit = cpu_limit(i, cpu_sensor(i));
+                r = r.thr(limit - 4.0, limit);
+            }
+            readings.push(r);
+        }
     }
     if g.caps.busy {
         readings.push(rd("igpu/main/usage", "Usage", Unit::Percent, g.busy_pct));
@@ -1247,7 +1265,7 @@ mod tests {
         let r = model("AMD Ryzen 7 7800X3D 8-Core Processor", 89.0, &c);
         assert_eq!(find(&r, "cpu/throttle/thermal").value, Some(1.0));
         assert_eq!(find(&r, "cpu/throttle/thermal").note.as_deref(), Some("inferred from Tctl"));
-        assert_eq!((find(&r, "cpu/temp/tctl").warn, find(&r, "cpu/temp/tctl").crit), (Some(80.0), Some(89.0)));
+        assert_eq!((find(&r, "cpu/temp/tctl").warn, find(&r, "cpu/temp/tctl").crit), (Some(85.0), Some(89.0)));
         let r = model("AMD Ryzen 7 7800X3D 8-Core Processor", 85.0, &c);
         assert_eq!(find(&r, "cpu/throttle/thermal").value, Some(0.0));
         // a 7950X at 89 is not throttling: its limit is 95
@@ -1275,6 +1293,114 @@ mod tests {
         assert_eq!(find(&r, "cpu/throttle/thermal").value, Some(0.0));
     }
 
+    #[test]
+    fn integrated_graphics_limit_is_the_drivers_else_the_cpus() {
+        let cpu = CpuVal { model_limit_c: Some(89.0), ..Default::default() };
+        let chips = k10(60.0);
+        let temp = |cfg: &Config, edge: GpuTemp| {
+            let mut igpu = card("igpu", Kind::Integrated);
+            igpu.edge = Some(edge);
+            let gpus = [igpu];
+            let mut i = base_inputs(cfg, &cpu, &chips);
+            i.gpus = &gpus;
+            let r = igpu_group(&i).unwrap().sections.remove(0).readings.remove(0);
+            assert_eq!(r.id, "igpu/main/temp");
+            (r.warn, r.crit)
+        };
+        // no limit from the driver: the CPU's, with the warning 4 lower
+        assert_eq!(temp(&cfg(), GpuTemp { value: Some(50.0), crit: None }), (Some(85.0), Some(89.0)));
+        // the user's CPU limit moves it too
+        let c = Config::for_test(&[], Some(80.0));
+        assert_eq!(temp(&c, GpuTemp { value: Some(50.0), crit: None }), (Some(76.0), Some(80.0)));
+        // a sane limit from the driver wins, with the warning 10 lower as on discrete cards
+        assert_eq!(temp(&cfg(), GpuTemp { value: Some(50.0), crit: Some(100.0) }), (Some(90.0), Some(100.0)));
+        // an implausible one is ignored
+        assert_eq!(temp(&cfg(), GpuTemp { value: Some(50.0), crit: Some(5.0) }), (Some(85.0), Some(89.0)));
+    }
+
+    #[test]
+    fn nvme_composite_follows_the_datasheet_rating_of_listed_models() {
+        let cfg = cfg();
+        let cpu = CpuVal::default();
+        let nvme = ChipVal {
+            name: "nvme".into(),
+            dev: "nvme0".into(),
+            temps: vec![tv("Composite", 40.0), tv("Sensor 1", 45.0)],
+            ..Default::default()
+        };
+        let chips = [nvme];
+        let disk = |model: &str| DiskVal {
+            serial: "S1".into(),
+            model: model.into(),
+            controller: Some("nvme0".into()),
+            mounts: vec![],
+            read_bps: None,
+            write_bps: None,
+            active_pct: None,
+        };
+        let limits = |model: &str| {
+            let disks = [disk(model)];
+            let mut i = base_inputs(&cfg, &cpu, &chips);
+            i.disks = &disks;
+            let g = disk_groups(&i).remove(0);
+            let r = &g.sections[1].readings;
+            let get = |id: &str| r.iter().find(|r| r.id.ends_with(id)).map(|r| (r.warn, r.crit)).unwrap();
+            (get("/composite"), get("/sensor_1"))
+        };
+        // rated 70: warning 65, critical 70; the other sensor keeps the generic rule
+        for m in ["Samsung SSD 990 PRO 2TB", "T-FORCE TM8FP5001T"] {
+            assert_eq!(limits(m), ((Some(65.0), Some(70.0)), (Some(70.0), Some(80.0))), "{m}");
+        }
+        // an unlisted drive keeps 70 and 80 on every sensor
+        assert_eq!(limits("Samsung SSD 980 PRO 1TB"), ((Some(70.0), Some(80.0)), (Some(70.0), Some(80.0))));
+    }
+
+    #[test]
+    fn asus_ec_vrm_gets_generic_limits_only_without_driver_limits() {
+        let cfg = cfg();
+        let cpu = CpuVal::default();
+        let ec = |vrm: TempVal| vec![ChipVal { name: "asusec".into(), temps: vec![tv("Motherboard", 40.0), vrm], ..Default::default() }];
+        let limits = |chips: &[ChipVal]| {
+            let g = board_group(&base_inputs(&cfg, &cpu, chips));
+            let r = &g.sections[0].readings;
+            let get = |id: &str| r.iter().find(|r| r.id == id).map(|r| (r.warn, r.crit)).unwrap();
+            (get("board/temp/asusec/vrm"), get("board/temp/asusec/motherboard"))
+        };
+        assert_eq!(limits(&ec(tv("VRM", 50.0))), ((Some(90.0), Some(100.0)), (None, None)));
+        // limits the driver reports are kept
+        let mut vrm = tv("VRM", 50.0);
+        vrm.max = Some(85.0);
+        vrm.crit = Some(95.0);
+        assert_eq!(limits(&ec(vrm)).0, (Some(85.0), Some(95.0)));
+        // other chips are untouched
+        let other = vec![ChipVal { name: "it8688".into(), temps: vec![tv("SYSTIN", 31.0), tv("VRM", 40.0)], ..Default::default() }];
+        let g = board_group(&base_inputs(&cfg, &cpu, &other));
+        assert!(g.sections[0].readings.iter().all(|r| r.warn.is_none() && r.crit.is_none()));
+    }
+
+    #[test]
+    fn nvidia_gpu_and_dimm_defaults_follow_the_published_ratings() {
+        let cfg = cfg();
+        let cpu = CpuVal::default();
+        let nvml = crate::nvml::GpuVal { temp_c: Some(60.0), ..Default::default() };
+        let lact = crate::lact::LactVal { hotspot_c: Some(70.0), vram_c: Some(60.0), vram_chips: [("A0".to_string(), 58.0)].into(), ..Default::default() };
+        let mut i = base_inputs(&cfg, &cpu, &[]);
+        i.gpu = Some(&nvml);
+        i.lact = Some(&lact);
+        let g = gpu_group(&i).unwrap();
+        let all: Vec<&Reading> = g.sections.iter().flat_map(|s| &s.readings).collect();
+        let get = |id: &str| all.iter().find(|r| r.id == id).map(|r| (r.warn, r.crit)).unwrap_or_else(|| panic!("no {id}"));
+        assert_eq!(get("gpu0/temp/core"), (Some(85.0), Some(90.0)));
+        assert_eq!(get("gpu0/temp/hotspot"), (Some(100.0), Some(105.0)));
+        assert_eq!(get("gpu0/temp/vram"), (Some(90.0), Some(95.0)));
+        assert_eq!(get("gpu0/vramchip/A0"), (Some(90.0), Some(95.0)));
+        // DIMM temperatures: JEDEC DDR5 normal range ends at 85
+        let spd = vec![ChipVal { name: "spd5118".into(), dev: "1-0050".into(), temps: vec![tv("temp1", 40.0)], ..Default::default() }];
+        let g = memory_group(&base_inputs(&cfg, &cpu, &spd));
+        let dimm = g.sections.iter().flat_map(|s| &s.readings).find(|r| r.id == "memory/temp/dimm1").unwrap();
+        assert_eq!((dimm.warn, dimm.crit), (Some(80.0), Some(85.0)));
+    }
+
     fn coretemp() -> Vec<ChipVal> {
         let mut pkg = tv("Package id 0", 55.0);
         pkg.crit = Some(100.0);
@@ -1294,7 +1420,7 @@ mod tests {
         let ids: Vec<&str> = r.iter().filter(|r| r.id.starts_with("cpu/temp/")).map(|r| r.id.as_str()).collect();
         assert_eq!(ids, ["cpu/temp/package", "cpu/temp/core0", "cpu/temp/core1", "cpu/temp/core8"]);
         // the limit is the driver's Tjmax
-        assert_eq!((find(&r, "cpu/temp/package").warn, find(&r, "cpu/temp/package").crit), (Some(91.0), Some(100.0)));
+        assert_eq!((find(&r, "cpu/temp/package").warn, find(&r, "cpu/temp/package").crit), (Some(96.0), Some(100.0)));
         let t = find(&r, "cpu/throttle/thermal");
         assert_eq!((t.value, t.note.as_deref()), (Some(0.0), Some("from the CPU's thermal throttle counters")));
         // a counter that rose means throttling, whatever the temperature

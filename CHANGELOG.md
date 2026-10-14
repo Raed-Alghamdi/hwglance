@@ -4,6 +4,10 @@ All notable changes to HW Glance are listed here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Changed
+
+- New default temperature limits, set from published ratings. CPU warning is now 4 °C below the CPU's limit (was 9). The integrated GPU gets limits too: the driver's, else the CPU's. NVIDIA core is 85 and 90 °C (was 80 and 88), hotspot 100 and 105 (was 95 and 105), VRAM and memory chips 90 and 95 (was 90 and 100), DIMMs 80 and 85 (was 60 and 75). Listed NVMe drives (Samsung 990 PRO, T-Force TM8FP5) take their datasheet rating of 70 °C for the Composite reading, with the warning 5 °C below. The ASUS EC's VRM reading gets 90 and 100 when the driver reports no limits. Limits you set yourself are not changed.
+
 ## [0.1.1] - 2026-10-14
 
 ### Added

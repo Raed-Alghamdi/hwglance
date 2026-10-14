@@ -110,7 +110,7 @@ For `config.toml`, copy [`packaging/config.example.toml`](packaging/config.examp
 
 - `interval_ms` and `slow_interval_ms` set the sample intervals (defaults 1000 and 2000 ms).
 - `[labels]` renames sensors and `[hide]` hides readings. `hwglanced --once --json` prints every reading id and sensor name on your machine.
-- `cpu_thermal_limit_c` (40 to 120 °C) is the temperature at which the CPU lowers its clocks. The Thermal throttling reading and the default CPU temperature limits use it (warning: 9 °C lower). Without it, the limit is the driver's (`temp*_crit`, else `temp*_max`), else AMD's published Tjmax for your Ryzen (`amd_tjmax` in [`crates/hwglanced/src/cpu.rs`](crates/hwglanced/src/cpu.rs)), else 95 °C. AMD CPUs do not report throttling to Linux, so HW Glance infers "Yes" within 0.5 °C of the limit; Intel CPUs report real events.
+- `cpu_thermal_limit_c` (40 to 120 °C) is the temperature at which the CPU lowers its clocks. The Thermal throttling reading and the default CPU temperature limits use it (warning: 4 °C lower). Without it, the limit is the driver's (`temp*_crit`, else `temp*_max`), else AMD's published Tjmax for your Ryzen (`amd_tjmax` in [`crates/hwglanced/src/cpu.rs`](crates/hwglanced/src/cpu.rs)), else 95 °C. AMD CPUs do not report throttling to Linux, so HW Glance infers "Yes" within 0.5 °C of the limit; Intel CPUs report real events.
 
 ### Text readouts
 
@@ -124,13 +124,14 @@ The collector creates this file on first start with every reading that can have 
 "cpu/temp/tctl": {
   "name": "CPU · Temperatures · Tctl",
   "unit": "°C",
-  "warn": 80,
+  "warn": 85,
   "crit": 89,
   "below": false,
-  "default": { "warn": 80, "crit": 89 }
+  "default": { "warn": 85, "crit": 89 }
 }
 ```
 
+- Default limits follow published ratings, not one fixed set. NVIDIA core, hotspot and memory, DIMMs (JEDEC DDR5) and listed NVMe drives (datasheet ratings in [`crates/hwglanced/src/disks.rs`](crates/hwglanced/src/disks.rs)) have built-in values; other drives use the limits the drive reports, else 70 and 80 °C. AMD and Intel graphics use the driver's limit, and the integrated GPU the CPU's when the driver has none. The ASUS EC's VRM reading gets 90 and 100 °C when the driver gives no limit.
 - `warn` and `crit` are numbers in the unit shown (GiB for memory, MB/s for transfer rates), or `null` for no limit at that level. At or above `warn` is a warning, at or above `crit` critical. With `"below": true` the direction flips, for fans and pumps. To add a limit, replace `null` with a number.
 - `name`, `unit` and `default` are for reference: the collector refreshes them and ignores your edits to them.
 - An entry equal to its defaults is "default". Any other entry replaces the defaults as a whole, everywhere (window, bar widget, notifications), so a level left `null` has no limit even where the default has one. Delete an entry to restore its defaults.

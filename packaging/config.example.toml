@@ -15,7 +15,7 @@
 
 # Temperature (40 to 120 degrees C; other values are ignored) at which the CPU lowers its
 # clocks to stay cool. The CPU "Thermal throttling" row and the default CPU temperature
-# limits use it; the warning limit is this minus 9. Without this key the limit is, in order:
+# limits use it; the warning limit is this minus 4. Without this key the limit is, in order:
 # the limit the driver reports (temp*_crit, else temp*_max), AMD's published Tjmax for your
 # Ryzen model (a table built into hwglanced), else 95. AMD does not report throttling to
 # Linux, so it is inferred (Yes while the temperature is within 0.5 degrees of the limit);

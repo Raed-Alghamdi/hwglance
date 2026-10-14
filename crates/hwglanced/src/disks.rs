@@ -134,6 +134,22 @@ fn read_mounts() -> HashMap<String, Vec<String>> {
     map
 }
 
+/// The datasheet operating temperature (upper end, degrees C) of an NVMe drive, from its model
+/// name. Unlisted drives get `None` and the generic limits. Each entry is a model-name prefix:
+/// - "Samsung SSD 990 PRO" 70: Samsung 990 PRO datasheet, 0 to 70 C measured by S.M.A.R.T.
+///   temperature,
+///   https://download.semiconductor.samsung.com/resources/data-sheet/Samsung_NVMe_SSD_990_PRO_Datasheet_Rev.1.0_10129514072296.pdf
+/// - "T-FORCE TM8FP5" 70: the Phison E12 family (firmware ECFM12), Phison E12S brochure, 0 to 70 C,
+///   https://www.phison.com/images/products_datasheet/ProductBrochure_Consumer_PS5012-E12S-032224.pdf
+pub fn nvme_rated_max_c(model: &str) -> Option<f64> {
+    const RATED: &[(&str, f64)] = &[("Samsung SSD 990 PRO", 70.0), ("T-FORCE TM8FP5", 70.0)];
+    let model = model.trim_start();
+    RATED
+        .iter()
+        .find(|(prefix, _)| model.get(..prefix.len()).is_some_and(|m| m.eq_ignore_ascii_case(prefix)))
+        .map(|(_, c)| *c)
+}
+
 fn identify(name: &str) -> (String, String, Option<String>) {
     let dev = Path::new("/sys/block").join(name).join("device");
     let controller = fs::canonicalize(&dev)
@@ -255,6 +271,17 @@ mod tests {
         assert!(!is_whole_disk("zram0"));
         assert!(!is_whole_disk("loop0"));
         assert!(!is_whole_disk("dm-0"));
+    }
+
+    #[test]
+    fn nvme_ratings_match_model_name_prefixes() {
+        assert_eq!(nvme_rated_max_c("Samsung SSD 990 PRO 2TB"), Some(70.0));
+        assert_eq!(nvme_rated_max_c("samsung ssd 990 pro 1tb"), Some(70.0));
+        assert_eq!(nvme_rated_max_c("T-FORCE TM8FP5001T"), Some(70.0));
+        assert_eq!(nvme_rated_max_c("Samsung SSD 980 PRO 1TB"), None);
+        assert_eq!(nvme_rated_max_c("T-FORCE TM8FP6001T"), None);
+        assert_eq!(nvme_rated_max_c("nvme0n1"), None);
+        assert_eq!(nvme_rated_max_c(""), None);
     }
 
     #[test]
