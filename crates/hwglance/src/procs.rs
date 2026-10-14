@@ -8,6 +8,7 @@ use crate::fonts;
 use crate::model::{self, class_title, RowId, RowKind, SortKey};
 use crate::settings::{Dock, PanelView};
 use crate::theme::{base, snap4, Palette};
+use crate::visibility;
 use crate::ui_kit::{self, ellipsized, f_label, f_label_bold, f_mono, f_mono_bold, f_section, f_small, icon};
 use egui::{pos2, vec2, Align2, Color32, FontId, Rect, RichText, Sense, Stroke, Ui, UiBuilder};
 use hwglance_proto::{format_value, ProcClass, ProcGroup, Unit};
@@ -882,7 +883,7 @@ impl App {
             })
             .collect();
         if let Some(at) = self.col_fit.update(&wanted, ui.input(|i| i.time), crate::theme::font_scale()) {
-            ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64((at - ui.input(|i| i.time)).max(0.05)));
+            visibility::repaint_after(ui.ctx(), std::time::Duration::from_secs_f64((at - ui.input(|i| i.time)).max(0.05)));
         }
     }
 

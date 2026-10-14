@@ -8,6 +8,7 @@
 //! D-Bus crate would add both. Without `gdbus` or the portal the answer is dark.
 
 use crate::theme::Scheme;
+use crate::visibility;
 use std::io::{BufRead, BufReader};
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
@@ -74,7 +75,7 @@ pub fn spawn(ctx: egui::Context, flag: SystemLight) {
     let publish = move |s: Scheme| {
         let light = s == Scheme::Light;
         if flag.swap(light, Ordering::Relaxed) != light {
-            ctx.request_repaint();
+            visibility::repaint(&ctx);
         }
     };
     let _ = std::thread::Builder::new().name("system-theme".into()).spawn(move || {

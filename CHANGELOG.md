@@ -12,6 +12,10 @@ All notable changes to HW Glance are listed here. The format follows [Keep a Cha
 
 - New default temperature limits, set from published ratings. CPU warning is now 4 °C below the CPU's limit (was 9). The integrated GPU gets limits too: the driver's, else the CPU's. NVIDIA core is 85 and 90 °C (was 80 and 88), hotspot 100 and 105 (was 95 and 105), VRAM and memory chips 90 and 95 (was 90 and 100), DIMMs 80 and 85 (was 60 and 75). Listed NVMe drives (Samsung 990 PRO, T-Force TM8FP5) take their datasheet rating of 70 °C for the Composite reading, with the warning 5 °C below. The ASUS EC's VRM reading gets 90 and 100 when the driver reports no limits. Limits you set yourself are not changed.
 
+### Fixed
+
+- On Hyprland the window could freeze and be ended from "not responding" while it was out of view (its workspace not shown on any monitor, or a fullscreen or maximized window in front of it). It kept drawing about once a second, and with vsync a draw to a window Hyprland is not showing waits for a frame callback that never comes, so the window stopped answering the compositor. The window now follows Hyprland's event socket, asks `j/clients` and `j/monitors` on every event that can move or cover it, and asks for no frames while it is hidden; it draws again at once when it is shown. Vsync and the frame rate are unchanged, and the collector keeps recording. Outside Hyprland nothing changes. If the compositor cannot be asked, the window counts as shown.
+
 ## [0.1.1] - 2026-10-14
 
 ### Added
