@@ -4,6 +4,8 @@ All notable changes to HW Glance are listed here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-15
+
 ### Added
 
 - The window now records every way it can end, so a window that vanishes can be traced. A startup or event-loop error (which only reached a stderr the launcher discards) is written to `crash.log` and the journal. SIGTERM, SIGINT, SIGHUP and SIGQUIT are recorded there too, with the sender's pid, uid and process name. A normal exit logs one journal line saying whether the window's own Close button or a close request from the compositor or window manager closed it, and each start logs one line with the version, pid and parent process.
@@ -48,6 +50,7 @@ First release.
 - Sensors are read only, and nothing leaves your machine.
 - Packages: an Arch package and a generic x86_64 Linux tarball.
 
-[Unreleased]: https://github.com/Raed-Alghamdi/hwglance/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/Raed-Alghamdi/hwglance/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/Raed-Alghamdi/hwglance/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Raed-Alghamdi/hwglance/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Raed-Alghamdi/hwglance/releases/tag/v0.1.0

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "raed.hwglance",
   "name": "HW Glance",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "author": "Raed",
   "license": "MIT",
   "description": "A quick look at CPU, GPU and memory sensors: an icon or live CPU and GPU usage in the bar, and a popup with top processes and End task, backed by the hwglanced collector",
