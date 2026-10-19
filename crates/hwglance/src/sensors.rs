@@ -515,6 +515,8 @@ pub struct ViewOut {
     pub stops: Vec<(egui::Id, String, Option<NavKey>)>,
     /// Limit changes made in a reading's menu, for the app to send to the collector.
     pub thr_edits: Vec<ThrEdit>,
+    /// A toast to show: the first value ticked for logging says where the file will go.
+    pub toast: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1746,6 +1748,7 @@ fn reading_menu(ui: &mut Ui, v: &mut SensorView, g: &SensorGroup, sec: &Section,
         v.out.show_history = Some(make_hit(v, g, r, rect));
         ui.close();
     }
+    log_item(ui, v, g, r);
     if ui.button("Hide").on_hover_text("Bring it back from Settings, Sensors").clicked() {
         crate::settings::toggle_in(&mut v.s.sensors.hidden, &r.id, true);
         ui.close();
@@ -1768,6 +1771,33 @@ fn reading_menu(ui: &mut Ui, v: &mut SensorView, g: &SensorGroup, sec: &Section,
         if threshold_editor(ui, v.pal, v.snap, v.pending, r, &mut v.out.thr_edits) {
             ui.close();
         }
+    }
+}
+
+/// "Log to file": ticks the reading for the collector's CSV log (Settings, Logging has the rest).
+/// While everything is logged it shows ticked and cannot be changed. The first value ticked
+/// says where the file will go. Menus draw checkboxes without an outline, so it gets one here.
+fn log_item(ui: &mut Ui, v: &mut SensorView, g: &SensorGroup, r: &Reading) {
+    let all = v.s.logging.all;
+    let mut on = all || v.s.logging.values.iter().any(|x| x == &r.id);
+    let first = !v.s.logging.active();
+    let resp = ui
+        .scope(|ui| {
+            ui.visuals_mut().widgets.inactive.bg_stroke = Stroke::new(1.0, v.pal.control());
+            let b = ui.add_enabled(!all, egui::Checkbox::new(&mut on, "Log to file"));
+            if all {
+                b.on_disabled_hover_text("Logging all values (Settings, Logging)")
+            } else {
+                b.on_hover_text("Write this value to a CSV file, every second by default. Settings, Logging has the folder and the interval.")
+            }
+        })
+        .inner;
+    if resp.changed() && !all {
+        crate::settings::toggle_in(&mut v.s.logging.values, &r.id, on);
+        if on && first && let Ok(folder) = v.s.logging.folder_path() {
+            v.out.toast = Some(format!("Logging {} {} to {}", g.title, r.label, folder.display()));
+        }
+        ui.close();
     }
 }
 
@@ -2051,6 +2081,7 @@ mod tests {
             crossings: vec![],
             limit_overrides: Default::default(),
             limits_error: None,
+            logging: None,
         }
     }
 

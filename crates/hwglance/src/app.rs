@@ -19,7 +19,7 @@ use crate::sensors::{self, DeviceState, Hit, ViewOut};
 use crate::thresholds::{Pending, ThrEdit};
 use eframe::egui;
 use egui::{pos2, vec2, Align, Color32, Event, FontId, Key, Layout, Margin, Modifiers, RichText, Sense, Stroke, Ui};
-use hwglance_proto::{format_value, ClientMsg, ProcGroup, Snapshot, Unit};
+use hwglance_proto::{format_value, ClientMsg, LogStatus, ProcGroup, Snapshot, Unit};
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
@@ -111,6 +111,8 @@ pub enum ResetKind {
     ProcViews,
     /// Settings, General: Reset all customisations.
     Customisations,
+    /// Settings, Logging: Stop logging (the values ticked and Log all hardware readings).
+    StopLogging,
 }
 
 /// What a reset replaced, as the window keeps it for an Undo.
@@ -121,6 +123,8 @@ pub enum Cleared {
     Layout(settings::LayoutPrefs),
     ProcViews(settings::ProcViews),
     Customisations(Box<Settings>),
+    /// What was being logged: everything, and the ticked ids in tick order.
+    Logging { all: bool, values: Vec<String> },
 }
 
 /// A reset that can still be taken back.
@@ -251,6 +255,7 @@ pub enum SettingsTab {
     Layout,
     Processes,
     History,
+    Logging,
     Alerts,
     BarWidget,
     Collector,
@@ -378,6 +383,14 @@ pub struct App {
     pub settings_tab: SettingsTab,
     pub bar_search: String,
     pub interval_edit: Option<u32>,
+    /// Settings, Logging: the folder text while it is being typed. It goes into ui.json on Enter
+    /// or when the field loses focus, so the collector never sees a half-typed path (it would
+    /// create a stray folder for each stage).
+    pub log_folder_edit: Option<String>,
+    /// The folder chooser that is open, which answers with the chosen folder (`None` for cancel).
+    pub log_picker: Option<std::sync::mpsc::Receiver<Option<String>>>,
+    /// Settings, Logging: the log files in the folder, read again every few seconds.
+    pub log_usage: Option<crate::settings_ui::LogUsage>,
     /// Settings, Sensors: the search that adds a threshold, and the reading it picked.
     pub thr_search: String,
     pub thr_pick: Option<String>,
@@ -532,6 +545,9 @@ impl App {
             settings_tab: SettingsTab::General,
             bar_search: String::new(),
             interval_edit: None,
+            log_folder_edit: None,
+            log_picker: None,
+            log_usage: None,
             thr_search: String::new(),
             thr_pick: None,
             thr_pending: Pending::default(),
@@ -947,6 +963,14 @@ impl App {
                     Cleared::Customisations(Box::new(before)),
                 )
             }
+            ResetKind::StopLogging => {
+                let (all, values) = (self.s.logging.all, self.s.logging.values.clone());
+                self.s.logging.stop();
+                if !all && values.is_empty() {
+                    return;
+                }
+                ("the values you were logging".to_string(), Cleared::Logging { all, values })
+            }
         };
         self.undo.retain(|e| e.kind != kind);
         self.undo.push(UndoEntry { kind, at: Instant::now(), what, cleared });
@@ -969,6 +993,10 @@ impl App {
                 self.s.restore_customisations(*saved);
                 self.rows_dirty = true;
                 self.force_resort = true;
+            }
+            Cleared::Logging { all, values } => {
+                self.s.logging.all = all;
+                self.s.logging.values = values;
             }
         }
     }
@@ -1734,6 +1762,9 @@ impl App {
             self.set_toast("Value copied".into(), true);
         }
         self.send_threshold_edits(std::mem::take(&mut out.thr_edits));
+        if let Some(text) = out.toast.take() {
+            self.set_toast(text, true);
+        }
         self.card_rects = out.card_rects.clone();
         self.sticky_heads = out.sticky.clone();
         self.nav_stops = std::mem::take(&mut out.stops);
@@ -1942,11 +1973,16 @@ impl App {
                     let cross_w = |form: crossings::ChipForm| {
                         if cross.is_empty() { 0.0 } else { crossings::chip_width(measure(&crossings::chip_label(&cross, form), f_label())) + space + 8.0 }
                     };
+                    // the logging chip (only while the collector logs): its word, then a dot
+                    let log_w = |form: LoggingForm| match snap_now.as_ref().and_then(|s| s.logging.as_ref()) {
+                        None => 0.0,
+                        Some(st) => logging_chip_width(measure(logging_chip_text(st), f_label()), form) + space + 8.0,
+                    };
                     let widths = BarWidths {
                         left: [
-                            measure("HW Glance", f_title()) + 12.0 + chips(LegendForm::Full) + cross_w(crossings::ChipForm::Text),
-                            measure("HW Glance", f_title()) + 12.0 + chips(LegendForm::Short) + cross_w(crossings::ChipForm::Text),
-                            measure("HW Glance", f_title()) + 12.0 + chips(LegendForm::Dot) + cross_w(crossings::ChipForm::Count),
+                            measure("HW Glance", f_title()) + 12.0 + chips(LegendForm::Full) + cross_w(crossings::ChipForm::Text) + log_w(LoggingForm::Text),
+                            measure("HW Glance", f_title()) + 12.0 + chips(LegendForm::Short) + cross_w(crossings::ChipForm::Text) + log_w(LoggingForm::Text),
+                            measure("HW Glance", f_title()) + 12.0 + chips(LegendForm::Dot) + cross_w(crossings::ChipForm::Count) + log_w(LoggingForm::Dot),
                         ],
                         // gear, maximize and close, Edit layout, Reset (the short form), the stale pill when it is up
                         right_fixed: measure(&icon::COG.to_string(), ui_kit::f_icon(base() + 2.0))
@@ -2000,6 +2036,14 @@ impl App {
                             .and_then(|r| r.inner);
                         if picked.is_some() {
                             jump_pinned = picked;
+                        }
+                    }
+                    if let Some(st) = snap_now.as_ref().and_then(|s| s.logging.as_ref()) {
+                        ui.add_space(8.0);
+                        let form = if density.legend() == LegendForm::Dot { LoggingForm::Dot } else { LoggingForm::Text };
+                        if logging_chip(ui, &pal, st, form).clicked() {
+                            self.settings_open = true;
+                            self.settings_tab = SettingsTab::Logging;
                         }
                     }
 
@@ -2746,6 +2790,56 @@ fn sources_chip(ui: &mut Ui, pal: &Palette, snap: &Snapshot, form: SourcesForm) 
             });
         }
     })
+}
+
+/// How much of the logging chip shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LoggingForm {
+    Text,
+    Dot,
+}
+
+/// What the logging chip says: "Logging" while the collector writes the log, "Log error" when it
+/// cannot.
+pub fn logging_chip_text(st: &LogStatus) -> &'static str {
+    if st.error.is_some() { "Log error" } else { "Logging" }
+}
+
+pub fn logging_chip_width(text_w: f32, form: LoggingForm) -> f32 {
+    match form {
+        LoggingForm::Text => crossings::chip_width(text_w),
+        LoggingForm::Dot => 28.0,
+    }
+}
+
+/// The top bar's logging chip, shown while the collector logs (it is not in the demo). Quiet grey
+/// words and an outline like an idle crossings chip; amber with "Log error" when the file cannot be
+/// written. A click opens Settings, Logging, and the hover says where the file is.
+fn logging_chip(ui: &mut Ui, pal: &Palette, st: &LogStatus, form: LoggingForm) -> egui::Response {
+    let failed = st.error.is_some();
+    let color = if failed { pal.warn } else { pal.ink3 };
+    let ink = if failed { pal.ink } else { pal.ink2 };
+    let text = if form == LoggingForm::Text { logging_chip_text(st) } else { "" };
+    let g = ui.painter().layout_no_wrap(text.to_string(), f_label(), ink);
+    let size = vec2(logging_chip_width(g.size().x, form), snap_h());
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    if resp.hovered() {
+        ui.painter().rect_filled(rect, 14.0, pal.hover);
+    }
+    if failed {
+        ui.painter().rect(rect, 14.0, color.gamma_multiply(0.14), Stroke::new(1.5, color), egui::StrokeKind::Inside);
+    } else {
+        ui.painter().rect_stroke(rect, 14.0, Stroke::new(1.0, pal.rule), egui::StrokeKind::Inside);
+    }
+    let dot_x = if form == LoggingForm::Dot { rect.center().x } else { rect.left() + 12.0 };
+    ui.painter().circle_filled(pos2(dot_x, rect.center().y), 4.0, color);
+    if form == LoggingForm::Text {
+        ui.painter().galley(pos2(rect.left() + 22.0, rect.center().y - g.size().y / 2.0), g, ink);
+    }
+    a11y::focus_ring(ui, &resp, 14.0, Ring::Outside, pal);
+    let tip = format!("{}. Click to open Settings, Logging.", crate::settings_ui::log_status_plain(st));
+    a11y::publish(&resp, || Spoken::button(logging_chip_text(st)).described(tip.clone()));
+    resp.on_hover_text(tip)
 }
 
 /// A small outlined status word (stale).

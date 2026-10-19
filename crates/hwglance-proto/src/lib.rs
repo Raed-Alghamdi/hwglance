@@ -22,6 +22,11 @@
 //! customised and what their defaults are, [`Snapshot::limits_error`] reports a file the collector
 //! could not read, and the window changes limits with [`ClientMsg::SetThreshold`] and
 //! [`ClientMsg::ResetThreshold`] instead of writing a file itself.
+//!
+//! Version 6 adds [`Snapshot::logging`], optional: what the collector's CSV log is doing (see
+//! [`LogStatus`]). It is bumped, although a version 5 peer still works, so that a window which
+//! offers logging can tell a collector that predates it (and would silently ignore the choices
+//! in ui.json) from one that is not logging, and say to restart it.
 
 pub mod crash;
 pub mod crossings;
@@ -32,7 +37,7 @@ use std::collections::BTreeMap;
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 
-pub const PROTO_VERSION: u32 = 5;
+pub const PROTO_VERSION: u32 = 6;
 
 /// How long after a [`ClientMsg::ResetStats`] the collector still accepts
 /// [`ClientMsg::UndoResetStats`]. Windows show their Undo button for the same time.
@@ -424,6 +429,26 @@ pub struct Snapshot {
     /// stay in force), with the line and column when known. Missing while the file is fine.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limits_error: Option<String>,
+    /// What the CSV log is doing; left out while logging is off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logging: Option<LogStatus>,
+}
+
+/// The collector's CSV log as the window shows it. The choices live in `ui.json` (the window
+/// writes them, the collector polls them), so this is the answer: whether they took effect.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+pub struct LogStatus {
+    /// The file rows are being appended to. Missing before the first one is opened (the
+    /// collector waits a few seconds so the slow sources are in the first file) and after an error.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    /// Value columns in that file (not counting the two time columns).
+    pub columns: u32,
+    /// Seconds between rows, as the collector applies it (1 to 3600).
+    pub interval_s: u32,
+    /// Why nothing is written, with the path. The collector retries every 10 s.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// Headline values. Also written every sample to [`summary_path`] for any
@@ -563,6 +588,75 @@ pub fn config_dir() -> Option<PathBuf> {
     Some(base.join("hwglance"))
 }
 
+/// Where CSV logs go unless the settings name a folder: `$XDG_STATE_HOME/hwglance/logs`, by
+/// default `~/.local/state/hwglance/logs` (next to the crash log). `None` without a home.
+pub fn default_log_dir() -> Option<PathBuf> {
+    crash::state_dir().map(|d| d.join("logs"))
+}
+
+/// The folder the log setting names: empty means [`default_log_dir`], `~` and `~/...` start at
+/// `$HOME`. The window and the collector both resolve it here, so they agree. A relative path is
+/// an error (the collector's working directory is nobody's business), told in words.
+pub fn log_folder(setting: &str) -> Result<PathBuf, String> {
+    let home = std::env::var_os("HOME").filter(|h| !h.is_empty()).map(PathBuf::from);
+    resolve_log_folder(setting, home, default_log_dir())
+}
+
+fn resolve_log_folder(setting: &str, home: Option<PathBuf>, default: Option<PathBuf>) -> Result<PathBuf, String> {
+    let setting = setting.trim();
+    if setting.is_empty() {
+        return default.ok_or_else(|| "there is no home folder to keep logs in".to_string());
+    }
+    let path = match setting {
+        "~" => home,
+        _ => match setting.strip_prefix("~/") {
+            Some(rest) => home.map(|h| h.join(rest)),
+            None => Some(PathBuf::from(setting)),
+        },
+    };
+    match path {
+        Some(p) if p.is_absolute() => Ok(p),
+        Some(_) => Err(format!("{setting} is not an absolute path: start it with / or ~/")),
+        None => Err(format!("{setting} needs a home folder, and there is none")),
+    }
+}
+
+/// The two forms a log file of ours takes in its folder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LogFile {
+    /// `hwglance-YYYY-MM-DD_HHMMSS.csv`, or with `-N` when that name was taken.
+    Plain,
+    /// The same name with `.gz` added, once the file is finished and compressed.
+    Gzip,
+}
+
+/// Whether `name` is exactly one of our log file names (`hwglance-2026-10-12_210433.csv`, with an
+/// optional `-2`, and either ending). The collector touches no other file in the log folder, and
+/// the window counts only these.
+pub fn log_file_kind(name: &str) -> Option<LogFile> {
+    let (stem, kind) = match (name.strip_suffix(".csv.gz"), name.strip_suffix(".csv")) {
+        (Some(s), _) => (s, LogFile::Gzip),
+        (None, Some(s)) => (s, LogFile::Plain),
+        _ => return None,
+    };
+    let rest = stem.strip_prefix("hwglance-")?.as_bytes();
+    const SHAPE: &[u8; 17] = b"dddd-dd-dd_dddddd";
+    if rest.len() < SHAPE.len() || !SHAPE.iter().zip(rest).all(|(s, c)| if *s == b'd' { c.is_ascii_digit() } else { c == s }) {
+        return None;
+    }
+    match &rest[SHAPE.len()..] {
+        [] => Some(kind),
+        [b'-', n @ ..] if !n.is_empty() && n.iter().all(u8::is_ascii_digit) => Some(kind),
+        _ => None,
+    }
+}
+
+/// The seconds between CSV rows the collector accepts.
+pub const LOG_INTERVAL_S: std::ops::RangeInclusive<u32> = 1..=3600;
+
+/// The days after which the collector may delete old logs (0 keeps them all).
+pub const LOG_KEEP_DAYS: std::ops::RangeInclusive<u32> = 0..=3650;
+
 /// The warning and critical limits of every reading, edited by hand or from the window and written
 /// by the collector only.
 pub fn thresholds_path() -> Option<PathBuf> {
@@ -690,6 +784,7 @@ mod tests {
             crossings: vec![],
             limit_overrides: BTreeMap::new(),
             limits_error: None,
+            logging: None,
         }
     }
 
@@ -861,6 +956,70 @@ mod tests {
         let with = serde_json::to_string(&snap).unwrap();
         assert!(with.contains(r#""limit_overrides":{"cpu/temp/tctl":{"crit":85.0,"default_warn":80.0,"default_crit":89.0}}"#), "{with}");
         assert_eq!(serde_json::from_str::<Snapshot>(&with).unwrap(), snap);
+    }
+
+    #[test]
+    fn version_6_logging_is_optional_both_ways() {
+        let mut snap = sample();
+        let plain = serde_json::to_string(&snap).unwrap();
+        assert!(!plain.contains("logging"), "{plain}");
+        assert_eq!(serde_json::from_str::<Snapshot>(&plain).unwrap().logging, None);
+        snap.logging = Some(LogStatus { file: Some("/x/hwglance-1.csv".into()), columns: 3, interval_s: 5, error: None });
+        let with = serde_json::to_string(&snap).unwrap();
+        assert!(with.contains(r#""logging":{"file":"/x/hwglance-1.csv","columns":3,"interval_s":5}"#), "{with}");
+        assert_eq!(serde_json::from_str::<Snapshot>(&with).unwrap(), snap);
+        snap.logging = Some(LogStatus { file: None, columns: 0, interval_s: 1, error: Some("/x: Permission denied".into()) });
+        let with = serde_json::to_string(&snap).unwrap();
+        assert_eq!(serde_json::from_str::<Snapshot>(&with).unwrap(), snap);
+    }
+
+    #[test]
+    fn the_log_folder_setting_resolves_the_same_way_for_both_sides() {
+        let home = Some(PathBuf::from("/home/u"));
+        let default = Some(PathBuf::from("/home/u/.local/state/hwglance/logs"));
+        let r = |s: &str| resolve_log_folder(s, home.clone(), default.clone());
+        assert_eq!(r(""), Ok(PathBuf::from("/home/u/.local/state/hwglance/logs")));
+        assert_eq!(r("  "), r(""));
+        assert_eq!(r("~"), Ok(PathBuf::from("/home/u")));
+        assert_eq!(r("~/logs/hw"), Ok(PathBuf::from("/home/u/logs/hw")));
+        assert_eq!(r("/var/tmp/x"), Ok(PathBuf::from("/var/tmp/x")));
+        assert!(r("logs").unwrap_err().contains("not an absolute path"));
+        assert!(r("./logs").is_err() && r("~user/x").is_err());
+        assert!(resolve_log_folder("~/x", None, None).unwrap_err().contains("home folder"));
+        assert!(resolve_log_folder("", None, None).is_err());
+        assert!(LOG_KEEP_DAYS.contains(&0) && LOG_KEEP_DAYS.contains(&3650) && !LOG_KEEP_DAYS.contains(&3651));
+        assert!(LOG_INTERVAL_S.contains(&1) && LOG_INTERVAL_S.contains(&3600) && !LOG_INTERVAL_S.contains(&0));
+    }
+
+    #[test]
+    fn only_our_own_log_file_names_match() {
+        use LogFile::{Gzip, Plain};
+        let k = log_file_kind;
+        assert_eq!(k("hwglance-2026-10-12_210433.csv"), Some(Plain));
+        assert_eq!(k("hwglance-2026-10-12_210433-2.csv"), Some(Plain));
+        assert_eq!(k("hwglance-2026-10-12_210433-17.csv"), Some(Plain));
+        assert_eq!(k("hwglance-2026-10-12_210433.csv.gz"), Some(Gzip));
+        assert_eq!(k("hwglance-2026-10-12_210433-3.csv.gz"), Some(Gzip));
+        for no in [
+            "hwglance-backup.csv",
+            "notes.txt",
+            "hwglance-2026-10-12_210433.csv.gz.tmp",
+            "hwglance-2026-10-12_210433.csv.tmp",
+            "hwglance-2026-10-12_210433.csv.bak",
+            "hwglance-2026-10-12_210433-.csv",
+            "hwglance-2026-10-12_210433-x.csv",
+            "hwglance-2026-10-12_210433x.csv",
+            "hwglance-2026-10-12_2104.csv",
+            "hwglance-2026-1-12_210433.csv",
+            "my-hwglance-2026-10-12_210433.csv",
+            "hwglance-2026-10-12_210433.gz",
+            "hwglance-2026-10-12_210433",
+            "hwglance-\u{661}026-10-12_210433.csv",
+            ".csv",
+            "",
+        ] {
+            assert_eq!(k(no), None, "{no}");
+        }
     }
 
     #[test]

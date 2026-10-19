@@ -21,6 +21,7 @@ The screenshots use built-in demo data.
 - **Safe actions.** End task sends a normal exit request at once. Force kill, and any process critical to the session (compositor, audio server, the collector), asks first. Other users' processes go through polkit.
 - **Resets act at once.** The reset button then reads Undo for 30 seconds, and Ctrl+Z takes back the latest reset.
 - **Your layout.** Watch, hide or rename readings, drag cards into place, and pick dark or light themes that follow the desktop. The top bar has its own Maximize and Close buttons.
+- **Logging.** Right-click a reading and tick Log to file, or log everything from Settings, Logging. The collector writes a CSV file, with the window closed too: see [Logging](#logging).
 - **Text readouts** (opt-in) for status bars, scripts and macro keypads: see [Text readouts](#text-readouts).
 - **Light.** The collector and the window each stay well under 2% of one core.
 
@@ -102,7 +103,7 @@ Files live in `~/.config/hwglance/` (`$XDG_CONFIG_HOME/hwglance/` when set):
 
 | File | Holds | Edited by |
 |---|---|---|
-| `ui.json` | Watched readings, layout, theme | the window |
+| `ui.json` | Watched readings, layout, theme, logging choices | the window |
 | `thresholds.json` | Warning and critical limits | you or the window |
 | `config.toml` | Collector settings (optional) | you |
 
@@ -138,6 +139,20 @@ The collector creates this file on first start with every reading that can have 
 - The collector checks the file every 2 seconds and applies a valid edit without rewriting it. It writes only to create the file, to add readings that appear later (your values stay, also for absent readings such as an unplugged drive), and on a change from the window.
 - An invalid file (broken JSON, a limit that is not a number) is not applied or overwritten. The last good limits stay and the window shows a banner (Settings, Alerts has the path and the error's line and column). Fix the file and the banner clears.
 - Limits an older version kept in `ui.json` move into this file once, when it is first created.
+
+## Logging
+
+HW Glance can write readings to a CSV file, for a long game session, a stress test or a cooling change.
+
+- **Start.** Right-click a reading and tick **Log to file**, or open Settings, Logging and tick **Log all hardware readings** (every reading of every card, hidden ones included, no processes). The top bar shows a Logging chip while it runs, and Settings, Logging holds the interval (every sample, or 2, 5, 10, 30 or 60 s), the folder, compression, an age limit, a size estimate and **Stop logging** (with Undo for 30 seconds).
+- **The collector writes it.** Logging goes on while the window is closed and starts again after you log in, until you stop it. Each row is the latest sample, not an average, and is flushed at once, so `tail -f` follows it.
+- **Where.** `~/.local/state/hwglance/logs/` (`$XDG_STATE_HOME/hwglance/logs/`) unless you choose a folder (an absolute path, or one that starts with `~/`). A file is named `hwglance-YYYY-MM-DD_HHMMSS.csv` (local time at its start, `-2`, `-3` added if the name is taken). Unless you set an age limit, HW Glance never deletes old logs.
+- **New file** when you tick or untick a value, when a reading appears that the file has no column for (with all readings), when the folder changes, when the local date changes and when the collector restarts. A reading that goes away keeps its column, empty, until then.
+- **Format.** UTF-8, comma separated, `\n` line ends, quoted as RFC 4180 says, `.` as the decimal point. The first columns are `Time` (local, `2026-10-12 21:04:33`) and `Unix time (ms)`; then one per value, headed like `CPU Tctl [°C]` (card, name, unit; the section too when two would be alike, then the id). Values are in the unit of the heading: °C, %, MHz, W, V, RPM and MT/s as they are, memory in MiB, transfer rates in MB/s, and Yes/No states as 1 or 0. An empty cell means no value in that sample.
+- **Precision.** A value is rounded the way the window shows it, to keep files small, and trailing zeros are dropped: 1 decimal for %, °C and W, none for MHz, RPM, MT/s and memory in MiB, 3 for V and MB/s. A row of 130 values (everything on a typical PC) takes about 590 bytes.
+- **Compression.** On by default (Settings, Logging, **Compress finished files**). When a file is finished it is written again as `hwglance-….csv.gz` (gzip, level 6) by a low-priority background thread of the collector, and the `.csv` is removed only after the `.gz` is complete and on disk; if that fails the `.csv` stays and the error goes to the journal once. The file being written stays plain, and with compression off every file does. When the collector starts, and when you turn compression on or change the folder, it also packs plain `hwglance-YYYY-MM-DD_HHMMSS.csv` files left in the folder (the one being written and subfolders are left alone). The result is about a quarter of the size (4 to 1 on a log of all readings). LibreOffice and Excel open a `.csv.gz` only after unpacking (double-click it in the file manager, or `gunzip`); pandas reads it directly.
+- **Age limit.** Settings, Logging, **Delete logs older than** (Keep all, 7, 30, 90 or 365 days; `logging.keep_days` in `ui.json`, 0 to 3650) deletes finished `hwglance-….csv` and `.csv.gz` files of the log folder whose last change is older than that, for good. Other files, subfolders and the file being written are never touched. It runs while logging is on, at the start, once a day, when you change the folder or the limit, and at most once an hour. The journal gets one line (`removed 3 files older than 7 days`).
+- **Errors.** When the folder cannot be made or written, Settings, Logging and the top bar say so with the path; the collector tries again every 10 seconds and writes the error once to its journal (`journalctl --user -u hwglanced`).
 
 ## Omarchy bar widget
 

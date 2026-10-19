@@ -1581,6 +1581,7 @@ dependencies = [
 name = "hwglanced"
 version = "0.1.2"
 dependencies = [
+ "flate2",
  "hwglance-proto",
  "libc",
  "nvml-wrapper",

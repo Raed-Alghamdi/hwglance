@@ -240,6 +240,16 @@ impl Core {
         self.procs.fresh()
     }
 
+    /// The CSV log choices from ui.json, as of the latest sample.
+    pub fn log_prefs(&self) -> &crate::uiprefs::LogPrefs {
+        &self.prefs.prefs.logging
+    }
+
+    /// The slow sources have reported at least once, so their readings are in the snapshots.
+    pub fn slow_reported(&self) -> bool {
+        self.slow_stamp > 0
+    }
+
     pub fn interval(&self) -> Duration {
         Duration::from_millis(self.cfg.interval_ms)
     }
@@ -531,6 +541,7 @@ impl Core {
             crossings: self.crossings.list().to_vec(),
             limit_overrides: self.limits.overrides().clone(),
             limits_error: self.limits.error().map(str::to_string),
+            logging: None,
         }
     }
 }

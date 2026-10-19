@@ -704,6 +704,7 @@ impl Demo {
             crossings: self.crossings.list().to_vec(),
             limit_overrides: std::mem::take(&mut self.shown),
             limits_error: None,
+            logging: None,
         }
     }
 

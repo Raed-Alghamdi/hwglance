@@ -4,6 +4,7 @@ mod alerts;
 mod config;
 mod core;
 mod cpu;
+mod csvlog;
 mod describe;
 mod desktop;
 mod disks;
@@ -15,6 +16,7 @@ mod hypr;
 mod ipc;
 mod lact;
 mod layout;
+mod logfiles;
 mod memory;
 mod nvml;
 mod pci;
@@ -336,6 +338,7 @@ fn run_daemon(cfg: Config) -> io::Result<()> {
     let mut next = Instant::now();
     let mut last_full = Instant::now();
     let mut cadence = ProcCadence::default();
+    let mut csv = csvlog::CsvLog::new(Instant::now());
     while !STOP.load(Ordering::Relaxed) {
         // Sleep until the next sample, waking early only to take process baselines.
         loop {
@@ -366,13 +369,14 @@ fn run_daemon(cfg: Config) -> io::Result<()> {
         }
         core.queue_threshold_edits(shared.take_edits());
         let mode = cadence.mode(Instant::now(), shared.want_procs(), shared.procs_focused(), shared.need_full_pending(), interval);
-        let snap = core.sample(mode);
+        let mut snap = core.sample(mode);
         if let Err(e) = write_summary(&snap.summary) {
             eprintln!("hwglanced: cannot write summary: {e}");
         }
         if let Err(e) = textexport::update(text_readouts, &snap.summary) {
             eprintln!("hwglanced: cannot write text readouts: {e}");
         }
+        snap.logging = csv.update(core.log_prefs(), &snap, core.slow_reported(), Instant::now(), csvlog::Local::of(snap.unix_ms));
         // A slim client that joined is owed a complete snapshot, and the flag stays until one has processes.
         let all_static = snap.procs.is_some()
             && (shared.take_need_full() || last_full.elapsed() >= FULL_STATIC_EVERY);
@@ -455,6 +459,7 @@ mod tests {
             crossings: vec![],
             limit_overrides: Default::default(),
             limits_error: None,
+            logging: None,
         }
     }
 

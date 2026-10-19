@@ -74,7 +74,7 @@ fn journal_socket() -> Option<PathBuf> {
 
 /// `$XDG_STATE_HOME/hwglance`, else `$HOME/.local/state/hwglance`. Relative paths are ignored,
 /// as the XDG specification says.
-fn state_dir() -> Option<PathBuf> {
+pub fn state_dir() -> Option<PathBuf> {
     let absolute = |name: &str| {
         std::env::var_os(name)
             .map(PathBuf::from)

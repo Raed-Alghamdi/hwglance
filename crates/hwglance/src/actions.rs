@@ -54,6 +54,58 @@ pub fn open_path(path: &str) -> std::io::Result<()> {
         })
 }
 
+/// Whether `name` is an executable file in a folder of `$PATH`.
+fn on_path(name: &str) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::env::var_os("PATH").is_some_and(|path| {
+        std::env::split_paths(&path).any(|d| std::fs::metadata(d.join(name)).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0))
+    })
+}
+
+/// The program that can show a folder chooser: `zenity`, else `kdialog` (checked once).
+pub fn folder_picker() -> Option<&'static str> {
+    static FOUND: std::sync::OnceLock<Option<&'static str>> = std::sync::OnceLock::new();
+    *FOUND.get_or_init(|| ["zenity", "kdialog"].into_iter().find(|p| on_path(p)))
+}
+
+/// The arguments that make `program` ask for one existing folder, starting in `start`.
+fn picker_args(program: &str, title: &str, start: &str) -> Vec<String> {
+    let start = if start.ends_with('/') { start.to_string() } else { format!("{start}/") };
+    match program {
+        "kdialog" => vec!["--getexistingdirectory".into(), start, "--title".into(), title.into()],
+        _ => vec!["--file-selection".into(), "--directory".into(), format!("--title={title}"), format!("--filename={start}")],
+    }
+}
+
+/// The folder a chooser printed: its first line; nothing for a cancel (which prints nothing).
+fn picked_folder(stdout: &str) -> Option<String> {
+    stdout.lines().next().map(str::trim).filter(|l| !l.is_empty()).map(str::to_string)
+}
+
+/// Ask for a folder in the desktop's own chooser without blocking the window: the program runs on
+/// its own thread and the answer arrives on the returned channel (`None` when it was cancelled or
+/// failed), after which the window is woken. `None` here when no chooser program is installed.
+pub fn choose_folder(ctx: &egui::Context, title: &str, start: &str) -> Option<std::sync::mpsc::Receiver<Option<String>>> {
+    let program = folder_picker()?;
+    let args = picker_args(program, title, start);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let ctx = ctx.clone();
+    std::thread::Builder::new()
+        .name("folder-picker".into())
+        .spawn(move || {
+            let out = std::process::Command::new(program)
+                .args(args)
+                .stdin(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .output();
+            let picked = out.ok().filter(|o| o.status.success()).and_then(|o| picked_folder(&String::from_utf8_lossy(&o.stdout)));
+            let _ = tx.send(picked);
+            ctx.request_repaint();
+        })
+        .ok()?;
+    Some(rx)
+}
+
 /// Field 22 (starttime) of a `/proc/<pid>/stat` line. The name field may contain spaces and
 /// parentheses, so parse from the last `)`.
 pub fn parse_start_ticks(stat: &str) -> Option<u64> {
@@ -228,6 +280,20 @@ fn pkexec_outcome(success: bool, code: Option<i32>, stderr: &str, n: usize, sig:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_folder_chooser_is_asked_for_a_folder_and_its_answer_is_read() {
+        let z = picker_args("zenity", "Pick", "/home/u/logs");
+        assert_eq!(z, ["--file-selection", "--directory", "--title=Pick", "--filename=/home/u/logs/"]);
+        let k = picker_args("kdialog", "Pick", "/home/u/logs/");
+        assert_eq!(k, ["--getexistingdirectory", "/home/u/logs/", "--title", "Pick"]);
+        assert_eq!(picked_folder("/home/u/logs\n"), Some("/home/u/logs".into()));
+        assert_eq!(picked_folder("  /a b/c  \nmore"), Some("/a b/c".into()));
+        assert_eq!(picked_folder(""), None, "a cancel prints nothing");
+        assert_eq!(picked_folder("\n"), None);
+        assert!(!on_path("hwglance-no-such-program"));
+        assert!(on_path("sh"));
+    }
 
     #[test]
     fn start_ticks_from_stat() {

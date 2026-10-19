@@ -41,7 +41,7 @@ A monitor that shows every sensor the machine exposes rather than a generic dash
 - Read-only toward hardware: it never writes fan, clock or power settings.
 - Stack: Rust with egui (immediate mode, glow renderer) for the window; Quickshell QML for the bar widget. The bar widget follows the Omarchy shell design; the window does not need to follow the Omarchy theme. Web-only tooling (the HTML/CSS detector) does not apply.
 - Resource budget: collector and window stay well under 2% of one core.
-- Every reading keeps a history (30 minutes by default, adjustable) shown on hover; limit alerts as desktop notifications that open the app at the reading; thermal and power throttling Yes/No per device card; a process panel that docks at the bottom or on the right, each with a compact and an expanded view, a column picker and a resizable Name column; one card arrangement shared by every dock and view; a bar button that shows the icon or live CPU and GPU usage; the window's own Maximize and Close buttons.
+- Every reading keeps a history (30 minutes by default, adjustable) shown on hover; limit alerts as desktop notifications that open the app at the reading; thermal and power throttling Yes/No per device card; a process panel that docks at the bottom or on the right, each with a compact and an expanded view, a column picker and a resizable Name column; one card arrangement shared by every dock and view; a bar button that shows the icon or live CPU and GPU usage; the window's own Maximize and Close buttons; an opt-in CSV log of the readings the user ticks, or all of them, that the collector writes while no window is open, rounded as the window shows it, gzipped when finished and optionally deleted after a number of days.
 
 ## Brand Commitments
 

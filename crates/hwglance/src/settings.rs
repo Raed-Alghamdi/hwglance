@@ -381,6 +381,58 @@ impl Default for AlertPrefs {
     }
 }
 
+/// What the collector writes to its CSV log (it polls these from ui.json and writes the file even
+/// while no window is open). Logging is on when `all` is set or `values` is not empty.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct LogPrefs {
+    /// Every reading the collector has, including the ones this window hides (not processes).
+    pub all: bool,
+    /// Reading ids ticked in the right-click menu, in the order ticked. Ids of sensors that are
+    /// not reported now stay, like `highlighted`.
+    pub values: Vec<String>,
+    /// Where the files go; empty means the default folder (`proto::default_log_dir`). `~` and
+    /// `~/...` start at the home folder.
+    pub folder: String,
+    /// Seconds between rows, one of [`LOG_CHOICES`] (a hand-edited value is kept, within 1 to 3600).
+    pub interval_seconds: u32,
+    /// Finished files are gzipped to `.csv.gz` by the collector (the file being written is not).
+    pub compress: bool,
+    /// The collector deletes log files older than this many days from the log folder; 0 keeps all.
+    pub keep_days: u32,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
+impl Default for LogPrefs {
+    fn default() -> Self {
+        LogPrefs { all: false, values: Vec::new(), folder: String::new(), interval_seconds: 1, compress: true, keep_days: 0, extra: Map::new() }
+    }
+}
+
+impl LogPrefs {
+    pub fn active(&self) -> bool {
+        self.all || !self.values.is_empty()
+    }
+
+    /// The folder the files go to, as the collector resolves it.
+    pub fn folder_path(&self) -> Result<PathBuf, String> {
+        hwglance_proto::log_folder(&self.folder)
+    }
+
+    /// Stop logging: nothing ticked, nothing logged by default. The folder and the interval stay.
+    pub fn stop(&mut self) {
+        self.all = false;
+        self.values.clear();
+    }
+}
+
+/// The seconds between rows the Logging tab offers.
+pub const LOG_CHOICES: [u32; 6] = [1, 2, 5, 10, 30, 60];
+
+/// The ages, in days, the Logging tab offers for deleting old logs (0 keeps them all).
+pub const KEEP_CHOICES: [u32; 5] = [0, 7, 30, 90, 365];
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Settings {
@@ -391,6 +443,7 @@ pub struct Settings {
     pub processes: ProcPrefs,
     pub tray: TrayPrefs,
     pub alerts: AlertPrefs,
+    pub logging: LogPrefs,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -405,6 +458,7 @@ impl Default for Settings {
             processes: ProcPrefs::default(),
             tray: TrayPrefs::default(),
             alerts: AlertPrefs::default(),
+            logging: LogPrefs::default(),
             extra: Map::new(),
         }
     }
@@ -471,19 +525,22 @@ impl Settings {
         }
     }
 
-    /// "Reset all customisations": everything except the bar widget and alert choices.
+    /// "Reset all customisations": everything except the bar widget, alert and logging choices
+    /// (a reset must not quietly stop a log that is running).
     pub fn reset_customisations(&mut self) {
         let tray = std::mem::take(&mut self.tray);
         let alerts = std::mem::take(&mut self.alerts);
-        *self = Settings { tray, alerts, ..Settings::default() };
+        let logging = std::mem::take(&mut self.logging);
+        *self = Settings { tray, alerts, logging, ..Settings::default() };
     }
 
-    /// Take back [`Settings::reset_customisations`]: `saved` is the state before it. The bar widget
-    /// and alert choices are the current ones, as the reset kept them.
+    /// Take back [`Settings::reset_customisations`]: `saved` is the state before it. The bar widget,
+    /// alert and logging choices are the current ones, as the reset kept them.
     pub fn restore_customisations(&mut self, saved: Settings) {
         let tray = std::mem::take(&mut self.tray);
         let alerts = std::mem::take(&mut self.alerts);
-        *self = Settings { tray, alerts, ..saved };
+        let logging = std::mem::take(&mut self.logging);
+        *self = Settings { tray, alerts, logging, ..saved };
     }
 
     pub fn is_highlighted(&self, id: &str) -> bool {
@@ -536,6 +593,9 @@ impl Settings {
         }
         // the collector keeps 1 to 240 minutes; the window asks for what it can answer
         self.sensors.history_minutes = self.sensors.history_minutes.clamp(1, 240);
+        // the collector accepts 1 s to 1 h between rows
+        self.logging.interval_seconds = self.logging.interval_seconds.clamp(*hwglance_proto::LOG_INTERVAL_S.start(), *hwglance_proto::LOG_INTERVAL_S.end());
+        self.logging.keep_days = self.logging.keep_days.min(*hwglance_proto::LOG_KEEP_DAYS.end());
     }
 }
 
@@ -967,6 +1027,92 @@ mod tests {
         assert_eq!(l, vec!["a"]);
         toggle_in(&mut l, "a", false);
         assert!(l.is_empty());
+    }
+
+    #[test]
+    fn logging_defaults_to_off_and_an_old_file_without_it_loads_with_the_defaults() {
+        let v: Value = serde_json::from_str(&to_json(&Settings::default())).unwrap();
+        assert_eq!(v["logging"]["all"], false);
+        assert_eq!(v["logging"]["values"], serde_json::json!([]));
+        assert_eq!(v["logging"]["folder"], "");
+        assert_eq!(v["logging"]["interval_seconds"], 1);
+        assert_eq!(v["logging"]["compress"], true, "finished files are packed unless told not to");
+        assert_eq!(v["logging"]["keep_days"], 0, "nothing is deleted unless told to");
+        let d = tmpdir("logging-old");
+        std::fs::write(d.join("ui.json"), r#"{"version":1,"alerts":{"level":"off"}}"#).unwrap();
+        let s = load(&d.join("ui.json")).settings;
+        assert_eq!(s.logging, LogPrefs::default());
+        assert!(!s.logging.active());
+        assert_eq!(s.alerts.level, "off");
+        // a file with only part of the object: the rest takes its defaults
+        let s: Settings = serde_json::from_str(r#"{"logging":{"values":["cpu/temp/tctl"]}}"#).unwrap();
+        assert!(s.logging.active() && !s.logging.all);
+        assert_eq!((s.logging.interval_seconds, s.logging.folder.as_str()), (1, ""));
+        assert!(s.logging.compress && s.logging.keep_days == 0);
+    }
+
+    #[test]
+    fn logging_round_trips_with_its_order_unknown_keys_and_ids_that_are_gone() {
+        let text = r#"{"version":1,"logging":{"all":false,"values":["gpu0/load/core","gone/sensor","cpu/temp/tctl"],
+            "folder":"~/hw logs","interval_seconds":30,"future_key":{"a":1}}}"#;
+        let s: Settings = serde_json::from_str(text).unwrap();
+        assert_eq!(s.logging.values, ["gpu0/load/core", "gone/sensor", "cpu/temp/tctl"]);
+        let path = tmpdir("logging-round").join("ui.json");
+        save_atomic(&path, &s, false).unwrap();
+        let back = load(&path).settings;
+        assert_eq!(back, s);
+        assert_eq!(back.logging.values[1], "gone/sensor", "the tick order and the missing sensor stay");
+        assert_eq!(back.logging.interval_seconds, 30);
+        assert_eq!(back.logging.extra["future_key"]["a"], 1);
+        assert!(std::fs::read_to_string(&path).unwrap().contains("future_key"));
+    }
+
+    #[test]
+    fn a_reset_and_its_undo_keep_the_logging_choices() {
+        let mut s = Settings {
+            logging: LogPrefs { all: true, values: vec!["cpu/temp/tctl".into()], folder: "/x".into(), interval_seconds: 10, compress: false, keep_days: 30, extra: Map::new() },
+            ..Settings::default()
+        };
+        s.sensors.hidden.push("x".into());
+        let before = s.clone();
+        s.reset_customisations();
+        assert_eq!(s.logging, before.logging, "a reset must not stop a log");
+        assert!(s.sensors.hidden.is_empty());
+        s.restore_customisations(before.clone());
+        assert_eq!(s, before);
+    }
+
+    #[test]
+    fn sanitize_keeps_the_log_interval_within_what_the_collector_accepts() {
+        for (given, want) in [(0, 1), (1, 1), (60, 60), (3600, 3600), (3601, 3600), (u32::MAX, 3600)] {
+            let mut s = Settings::default();
+            s.logging.interval_seconds = given;
+            s.sanitize();
+            assert_eq!(s.logging.interval_seconds, want, "{given}");
+        }
+        let d = tmpdir("logging-sanitize");
+        std::fs::write(d.join("ui.json"), r#"{"logging":{"interval_seconds":0}}"#).unwrap();
+        assert_eq!(load(&d.join("ui.json")).settings.logging.interval_seconds, 1);
+        assert!(LOG_CHOICES.iter().all(|c| hwglance_proto::LOG_INTERVAL_S.contains(c)));
+        assert!(KEEP_CHOICES.iter().all(|c| hwglance_proto::LOG_KEEP_DAYS.contains(c)));
+        for (given, want) in [(0, 0), (30, 30), (3650, 3650), (3651, 3650), (u32::MAX, 3650)] {
+            let mut s = Settings::default();
+            s.logging.keep_days = given;
+            s.sanitize();
+            assert_eq!(s.logging.keep_days, want, "{given}");
+        }
+    }
+
+    #[test]
+    fn stopping_clears_what_is_logged_and_keeps_the_folder_and_interval() {
+        let mut l = LogPrefs { all: true, values: vec!["a".into()], folder: "/x".into(), interval_seconds: 5, compress: false, keep_days: 7, extra: Map::new() };
+        assert!(l.active());
+        l.stop();
+        assert!(!l.active());
+        assert_eq!((l.folder.as_str(), l.interval_seconds, l.compress, l.keep_days), ("/x", 5, false, 7));
+        assert_eq!(l.folder_path().unwrap(), PathBuf::from("/x"));
+        l.folder = "relative".into();
+        assert!(l.folder_path().is_err());
     }
 
     #[test]

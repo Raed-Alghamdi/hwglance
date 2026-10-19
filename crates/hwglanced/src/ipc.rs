@@ -487,6 +487,7 @@ mod tests {
             }],
             limit_overrides: Default::default(),
             limits_error: None,
+            logging: None,
         };
         let publish = |s: Snapshot| {
             let latest = crate::encode(s, Demand::default(), &Default::default(), false).unwrap();

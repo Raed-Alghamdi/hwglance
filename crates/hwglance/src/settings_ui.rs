@@ -1,18 +1,19 @@
-//! The settings window: General, Sensors, Layout, Processes, History, Alerts, Bar widget and
-//! Collector tabs.
+//! The settings window: General, Sensors, Layout, Processes, History, Logging, Alerts, Bar widget
+//! and Collector tabs.
 
 use crate::a11y::{self, Spoken};
+use crate::actions;
 use crate::app::{source_label, App, ResetKind, SettingsTab};
 use crate::collector_cfg;
 use crate::conn;
 use crate::fonts::FontChoice;
 use crate::sensors::threshold_editor;
-use crate::settings::{self, Settings, HISTORY_CHOICES};
+use crate::settings::{self, Settings, HISTORY_CHOICES, KEEP_CHOICES, LOG_CHOICES};
 use crate::theme::{base, fs, ThemeChoice};
 use crate::thresholds::ThrEdit;
 use crate::ui_kit::{f_icon, f_label_bold, icon, reset_button, ResetButton};
 use egui::{vec2, Context, RichText, Ui};
-use hwglance_proto::{self as proto, Reading, Snapshot, Unit};
+use hwglance_proto::{self as proto, LogStatus, Reading, Snapshot, Unit};
 use std::collections::HashMap;
 
 /// Design width of the Settings window, and the smallest hit area of its close button.
@@ -147,6 +148,130 @@ pub fn history_cost_mb(minutes: u32) -> f32 {
     minutes as f32 * 2.0 / 30.0
 }
 
+/// Bytes of one CSV row with no value cells: "2026-10-12 21:04:33," and "1760000000000," and the
+/// line end.
+const LOG_ROW_BASE_BYTES: f64 = 35.0;
+/// A value cell as written after rounding to the window's precision (72.4 or 4950 or 0.5) plus its
+/// comma, on average. Measured on 2026-10-19 on a 194 row "all readings" log at 1 s of the
+/// author's PC (130 values a row, 588 bytes a row, so (588 - 35) / 130 = 4.3).
+const LOG_CELL_BYTES: f64 = 4.3;
+/// What gzip -6 makes of the rows of that log: 114,158 bytes became 28,695, so a quarter. A file
+/// of mostly steady values packs better, one of busy values worse.
+const LOG_PACK_RATIO: f64 = 4.0;
+
+/// About how many MB (of 1,048,576 bytes) a log of `columns` values every `interval_s` seconds
+/// grows by in an hour and in a day.
+pub fn log_cost_mb(columns: u32, interval_s: u32) -> (f64, f64) {
+    let row = LOG_ROW_BASE_BYTES + LOG_CELL_BYTES * f64::from(columns);
+    let per_hour = row * 3600.0 / f64::from(interval_s.max(1)) / (1024.0 * 1024.0);
+    (per_hour, per_hour * 24.0)
+}
+
+/// What a size becomes once finished files are gzipped.
+pub fn log_packed_mb(mb: f64) -> f64 {
+    mb / LOG_PACK_RATIO
+}
+
+/// The log files in the folder, as the Logging tab counts them: how many and how many bytes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LogUsage {
+    pub folder: std::path::PathBuf,
+    pub at: std::time::Instant,
+    pub files: usize,
+    pub bytes: u64,
+}
+
+/// How often the folder is read again while the tab is open.
+const USAGE_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
+
+impl LogUsage {
+    /// The files of `dir` with our names (`hwglance-*.csv` and `.csv.gz`): no subfolders, no
+    /// other files. A missing folder holds none.
+    pub fn read(dir: &std::path::Path) -> LogUsage {
+        let (mut files, mut bytes) = (0, 0);
+        for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let ours = e.file_name().to_str().and_then(proto::log_file_kind).is_some();
+            if let (true, Ok(m)) = (ours, e.metadata())
+                && m.is_file()
+            {
+                files += 1;
+                bytes += m.len();
+            }
+        }
+        LogUsage { folder: dir.to_path_buf(), at: std::time::Instant::now(), files, bytes }
+    }
+
+    /// Whether this reading is for `dir` and recent enough.
+    pub fn fresh_for(&self, dir: &std::path::Path) -> bool {
+        self.folder == dir && self.at.elapsed() < USAGE_EVERY
+    }
+
+    /// "This folder holds 3 log files, 12 MB".
+    pub fn text(&self) -> String {
+        match self.files {
+            0 => "This folder holds no log files yet.".to_string(),
+            n => format!("This folder holds {n} log {}, {} MB.", if n == 1 { "file" } else { "files" }, mb_text(self.bytes as f64 / (1024.0 * 1024.0))),
+        }
+    }
+}
+
+/// "Keep all", "7 days".
+fn keep_label(days: u32) -> String {
+    if days == 0 { "Keep all".to_string() } else { format!("{days} days") }
+}
+
+/// A size for the estimate: "under 0.1", "2.9", "69".
+fn mb_text(mb: f64) -> String {
+    if mb < 0.1 {
+        "under 0.1".to_string()
+    } else if mb < 10.0 {
+        format!("{mb:.1}")
+    } else {
+        format!("{mb:.0}")
+    }
+}
+
+/// "1 value", "5 values".
+fn values_text(n: u32) -> String {
+    format!("{n} {}", if n == 1 { "value" } else { "values" })
+}
+
+/// How many readings "Log all hardware readings" writes now: every reading of every card.
+pub fn log_reading_count(snap: &Snapshot) -> usize {
+    snap.sensors.iter().flat_map(|g| &g.sections).map(|s| s.readings.len()).sum()
+}
+
+/// The status in words, and the file's path apart (it is set in monospace): an error as it is,
+/// "Logging 3 values every 5 s to" and the path, or the wait before the first file.
+pub fn log_status_text(st: &LogStatus) -> (String, Option<String>) {
+    if let Some(e) = &st.error {
+        return (e.clone(), None);
+    }
+    match &st.file {
+        Some(f) => (format!("Logging {} every {} s to", values_text(st.columns), st.interval_s), Some(f.clone())),
+        None => ("Logging starts in a moment: the collector waits a few seconds so every source is in the first file.".to_string(), None),
+    }
+}
+
+/// [`log_status_text`] on one line, for hover texts and the screen reader.
+pub fn log_status_plain(st: &LogStatus) -> String {
+    match log_status_text(st) {
+        (words, Some(path)) => format!("{words} {path}"),
+        (words, None) => words,
+    }
+}
+
+/// "1 s (every sample)", "30 s".
+fn log_interval_label(s: u32) -> String {
+    if s == 1 { "1 s (every sample)".to_string() } else { format!("{s} s") }
+}
+
+/// Said when the collector samples less often than the log asks for: it cannot write more rows
+/// than it takes samples.
+pub fn log_pace_note(interval_s: u32, sample_ms: u32) -> Option<String> {
+    (sample_ms > interval_s.saturating_mul(1000)).then(|| format!("The collector samples every {:.1} s, so rows come at that pace.", f64::from(sample_ms) / 1000.0))
+}
+
 pub fn level_label(level: &str) -> &'static str {
     match level {
         "off" => "Off",
@@ -164,6 +289,11 @@ pub fn scope_label(scope: &str) -> &'static str {
 
 impl App {
     pub(crate) fn settings_window(&mut self, ctx: &Context) {
+        self.poll_log_picker();
+        // a folder typed but not yet entered is kept when the tab or the window goes away
+        if self.log_folder_edit.is_some() && !(self.settings_open && self.settings_tab == SettingsTab::Logging) {
+            self.commit_log_folder();
+        }
         let was_open = std::mem::replace(&mut self.settings_was_open, self.settings_open);
         if !self.settings_open {
             return;
@@ -204,6 +334,7 @@ impl App {
                     (SettingsTab::Layout, "Layout"),
                     (SettingsTab::Processes, "Processes"),
                     (SettingsTab::History, "History"),
+                    (SettingsTab::Logging, "Logging"),
                     (SettingsTab::Alerts, "Alerts"),
                     (SettingsTab::BarWidget, "Bar widget"),
                     (SettingsTab::Collector, "Collector"),
@@ -220,6 +351,7 @@ impl App {
                 SettingsTab::Layout => self.tab_layout(ui),
                 SettingsTab::Processes => self.tab_processes(ui),
                 SettingsTab::History => self.tab_history(ui),
+                SettingsTab::Logging => self.tab_logging(ui),
                 SettingsTab::Alerts => self.tab_alerts(ui),
                 SettingsTab::BarWidget => self.tab_bar_widget(ui),
                 SettingsTab::Collector => self.tab_collector(ui),
@@ -270,7 +402,7 @@ impl App {
         ui.add_space(14.0);
         ui.separator();
         ui.label(RichText::new("Reset all customisations").font(f_label_bold()));
-        ui.label("Clears hidden and watched values, collapsed values, layout, process, theme and font settings. The bar widget and alert choices are kept, and so are the limits in thresholds.json.");
+        ui.label("Clears hidden and watched values, collapsed values, layout, process, theme and font settings. The bar widget, alert and logging choices are kept, and so are the limits in thresholds.json.");
         let c = ResetButton {
             enabled: true,
             label: "Reset all customisations",
@@ -570,6 +702,252 @@ impl App {
             .color(self.pal.ink2),
         );
         ui.label(RichText::new("The collector reads this setting from ui.json.").color(self.pal.ink3));
+    }
+
+    /// The answer of the folder chooser, when it has come (the chooser runs on its own thread).
+    fn poll_log_picker(&mut self) {
+        use std::sync::mpsc::TryRecvError;
+        let Some(rx) = &self.log_picker else { return };
+        match rx.try_recv() {
+            Ok(picked) => {
+                self.log_picker = None;
+                if let Some(folder) = picked {
+                    self.log_folder_edit = None;
+                    self.s.logging.folder = folder;
+                }
+            }
+            Err(TryRecvError::Disconnected) => self.log_picker = None,
+            Err(TryRecvError::Empty) => {}
+        }
+    }
+
+    /// Put the typed folder into the settings (and so, within a second, into ui.json).
+    fn commit_log_folder(&mut self) {
+        if let Some(text) = self.log_folder_edit.take() {
+            self.s.logging.folder = text.trim().to_string();
+        }
+    }
+
+    fn tab_logging(&mut self, ui: &mut Ui) {
+        let cat = catalog(self.snap.as_deref());
+        let name = |id: &str| cat.names.get(id).cloned().unwrap_or_else(|| format!("{id} (not reported now)"));
+        self.heading(ui, "Logging");
+        self.log_status(ui);
+        ui.add_space(8.0);
+
+        ui.checkbox(&mut self.s.logging.all, "Log all hardware readings")
+            .on_hover_text("Every value of every card, including the ones hidden in this window. Processes are not logged.");
+        if let Some(snap) = self.snap.as_deref() {
+            ui.label(RichText::new(format!("That is {} readings now. A new reading starts a new file.", log_reading_count(snap))).color(self.pal.ink3));
+        }
+        ui.add_space(8.0);
+
+        let all = self.s.logging.all;
+        ui.label(RichText::new("Values to log").font(f_label_bold()));
+        let mut remove: Option<String> = None;
+        ui.add_enabled_ui(!all, |ui| {
+            if self.s.logging.values.is_empty() {
+                ui.label(RichText::new("Nothing ticked.").color(self.pal.ink3));
+            }
+            for id in &self.s.logging.values {
+                ui.horizontal(|ui| {
+                    let full = name(id);
+                    let b = ui.button("Remove");
+                    a11y::publish(&b, || Spoken::button(format!("Stop logging {full}")));
+                    if b.clicked() {
+                        remove = Some(id.clone());
+                    }
+                    ui.label(full);
+                });
+            }
+            ui.label(RichText::new("Right-click a value in the sensor panels and choose Log to file to add it. The columns follow the order they were added in.").color(self.pal.ink3));
+        });
+        if all {
+            ui.label(RichText::new("Everything is logged, so the list is not used.").color(self.pal.ink3));
+        }
+        if let Some(id) = remove {
+            self.s.logging.values.retain(|x| x != &id);
+        }
+        ui.add_space(8.0);
+
+        egui::Grid::new("logging-grid").num_columns(2).spacing(vec2(12.0, 8.0)).show(ui, |ui| {
+            grid_label(ui, "Every");
+            egui::ComboBox::from_id_salt("log-interval")
+                .selected_text(log_interval_label(self.s.logging.interval_seconds))
+                .show_ui(ui, |ui| {
+                    for m in LOG_CHOICES {
+                        ui.selectable_value(&mut self.s.logging.interval_seconds, m, log_interval_label(m));
+                    }
+                });
+            ui.end_row();
+            grid_label(ui, "Folder");
+            self.log_folder_row(ui);
+            ui.end_row();
+            grid_label(ui, "Delete logs older than");
+            egui::ComboBox::from_id_salt("log-keep")
+                .selected_text(keep_label(self.s.logging.keep_days))
+                .show_ui(ui, |ui| {
+                    for d in KEEP_CHOICES {
+                        ui.selectable_value(&mut self.s.logging.keep_days, d, keep_label(d));
+                    }
+                });
+            ui.end_row();
+        });
+        if self.s.logging.keep_days > 0 {
+            ui.label(
+                RichText::new(format!(
+                    "Files older than {} in this folder are deleted for good. Only HW Glance's own hwglance-*.csv and .csv.gz files are touched.",
+                    keep_label(self.s.logging.keep_days)
+                ))
+                .color(self.pal.warn),
+            );
+        }
+        if let Ok(dir) = self.s.logging.folder_path() {
+            if !self.log_usage.as_ref().is_some_and(|u| u.fresh_for(&dir)) {
+                self.log_usage = Some(LogUsage::read(&dir));
+            }
+            if let Some(u) = &self.log_usage {
+                ui.label(RichText::new(u.text()).color(self.pal.ink3));
+            }
+            ui.ctx().request_repaint_after(USAGE_EVERY);
+        }
+        ui.add_space(6.0);
+        ui.checkbox(&mut self.s.logging.compress, "Compress finished files (gzip)")
+            .on_hover_text("A finished file becomes .csv.gz and the .csv goes once the .gz is complete");
+        ui.label(
+            RichText::new("Finished files become .csv.gz, about a quarter of the size. LibreOffice and Excel need them unpacked first (double-click in the file manager, or gunzip); pandas reads them as they are. The file being written stays plain.")
+                .color(self.pal.ink3),
+        );
+        if let Some(note) = self.snap.as_deref().and_then(|s| log_pace_note(self.s.logging.interval_seconds, s.interval_ms)) {
+            ui.label(RichText::new(note).color(self.pal.ink3));
+        }
+        if let Err(e) = self.s.logging.folder_path() {
+            ui.label(RichText::new(e).color(self.pal.crit));
+        }
+
+        let columns = if all { self.snap.as_deref().map_or(0, |s| log_reading_count(s) as u32) } else { self.s.logging.values.len() as u32 };
+        if columns > 0 {
+            let (hour, day) = log_cost_mb(columns, self.s.logging.interval_seconds);
+            ui.add_space(6.0);
+            let packed = if self.s.logging.compress { format!(", about {} MB once compressed", mb_text(log_packed_mb(day))) } else { String::new() };
+            ui.label(
+                RichText::new(format!(
+                    "About {} MB an hour and {} MB a day for {} every {} s{packed}.",
+                    mb_text(hour),
+                    mb_text(day),
+                    values_text(columns),
+                    self.s.logging.interval_seconds
+                ))
+                .color(self.pal.ink2),
+            );
+        }
+        ui.add_space(10.0);
+        ui.label(
+            RichText::new("Each file is a CSV: the time, the Unix time in ms, then a column per value in the unit named in its heading, rounded the way this window shows it. An empty cell means the value was not available.")
+                .color(self.pal.ink3),
+        );
+        ui.label(
+            RichText::new("The collector writes the log, so it keeps going while this window is closed and after you log in again, until you stop it here or untick the values. A new file starts each day and whenever the logged values change.")
+                .color(self.pal.ink3),
+        );
+        ui.add_space(8.0);
+        let c = ResetButton {
+            enabled: self.s.logging.active(),
+            label: "Stop logging",
+            tip: "Stop writing the log: clears the ticked values and Log all hardware readings. The files stay where they are.",
+            disabled_tip: "Nothing is being logged",
+            undo: self.undo_offer(ResetKind::StopLogging),
+        };
+        if ui.horizontal(|ui| reset_button(ui, &self.pal, &c)).inner {
+            self.reset_or_undo(ResetKind::StopLogging);
+        }
+    }
+
+    /// What the collector says it is doing, as the first line of the tab.
+    fn log_status(&mut self, ui: &mut Ui) {
+        let pal = self.pal.clone();
+        let Some(snap) = self.snap.clone() else {
+            ui.label(RichText::new("Not connected to the collector, so the log's state is not known.").color(pal.ink3));
+            return;
+        };
+        match (&snap.logging, self.s.logging.active()) {
+            (Some(st), _) => {
+                let (words, path) = log_status_text(st);
+                if st.error.is_some() {
+                    ui.label(RichText::new(words).color(pal.crit));
+                    ui.label(RichText::new("The collector tries again every 10 seconds.").color(pal.ink3));
+                } else {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(RichText::new(words).font(f_label_bold()).color(pal.ink));
+                        if let Some(p) = path {
+                            ui.label(RichText::new(p).monospace().color(pal.ink2));
+                        }
+                    });
+                }
+            }
+            // chosen here but not reported: the collector has not read ui.json yet (within 2 s),
+            // or is a version that does not log
+            (None, true) if snap.proto < proto::PROTO_VERSION => {
+                ui.label(RichText::new("The collector is older than this window and does not write logs. Restart it with systemctl --user restart hwglanced.").color(pal.warn));
+            }
+            (None, true) => {
+                ui.label(RichText::new("Logging starts within a few seconds.").color(pal.ink2));
+            }
+            (None, false) => {
+                ui.label(RichText::new("Not logging").font(f_label_bold()).color(pal.ink));
+            }
+        }
+    }
+
+    /// The folder field and its buttons. The text goes into the settings on Enter or when the
+    /// field loses focus, not on every key: the collector creates the folder it is told about.
+    fn log_folder_row(&mut self, ui: &mut Ui) {
+        let default = proto::default_log_dir().map(|p| p.display().to_string()).unwrap_or_default();
+        ui.horizontal_wrapped(|ui| {
+            let mut text = self.log_folder_edit.clone().unwrap_or_else(|| self.s.logging.folder.clone());
+            let field = egui::TextEdit::singleline(&mut text)
+                .id(egui::Id::new("log-folder"))
+                .font(egui::TextStyle::Monospace)
+                .hint_text(RichText::new(default).monospace())
+                .desired_width(fs(400.0))
+                .margin(vec2(8.0, 4.0))
+                .min_size(vec2(0.0, crate::theme::MIN_HIT));
+            let r = ui.add(field);
+            a11y::publish(&r, || Spoken::new(egui::accesskit::Role::TextInput, "Folder for the log files"));
+            if r.changed() {
+                self.log_folder_edit = Some(text);
+            }
+            if r.lost_focus() {
+                self.commit_log_folder();
+            }
+            let program = actions::folder_picker();
+            let pick = ui
+                .add_enabled(program.is_some() && self.log_picker.is_none(), egui::Button::new("Choose..."))
+                .on_hover_text("Pick the folder in a file chooser")
+                .on_disabled_hover_text(if program.is_none() { "Needs zenity or kdialog to show a file chooser. Type the folder instead." } else { "The file chooser is open" });
+            if pick.clicked() {
+                let start = self.s.logging.folder_path().ok().filter(|p| p.is_dir()).or_else(|| std::env::var_os("HOME").map(std::path::PathBuf::from)).unwrap_or_default();
+                self.log_picker = actions::choose_folder(ui.ctx(), "Choose the folder for the log files", &start.display().to_string());
+                if self.log_picker.is_none() {
+                    self.set_toast("Could not open a file chooser".into(), false);
+                }
+            }
+            if ui.button("Open folder").on_hover_text("Show the log folder in the file manager (it is made if it does not exist)").clicked() {
+                match self.s.logging.folder_path() {
+                    Ok(dir) => {
+                        let opened = std::fs::create_dir_all(&dir).and_then(|()| actions::open_path(&dir.display().to_string()));
+                        if let Err(e) = opened {
+                            self.set_toast(format!("Could not open the folder: {e}"), false);
+                        }
+                    }
+                    Err(e) => self.set_toast(e, false),
+                }
+            }
+            if ui.button("Default").on_hover_text("Use the default folder").clicked() {
+                self.log_folder_edit = None;
+                self.s.logging.folder.clear();
+            }
+        });
     }
 
     fn tab_alerts(&mut self, ui: &mut Ui) {
@@ -1015,6 +1393,47 @@ mod tests {
                 panic!("{name} is both {id} and {other}");
             }
         }
+    }
+
+    #[test]
+    fn the_log_size_estimate_follows_the_columns_and_the_interval() {
+        // 5 values every second: 35 + 5 * 4.3 = 56.5 bytes a row, 3600 rows an hour
+        let (hour, day) = log_cost_mb(5, 1);
+        assert!((hour - 56.5 * 3600.0 / 1_048_576.0).abs() < 1e-9, "{hour}");
+        assert!((log_packed_mb(day) * 4.0 - day).abs() < 1e-9, "a packed file is a quarter");
+        assert!((day - hour * 24.0).abs() < 1e-9);
+        // every 60 s it is a sixtieth of that, and 100 values cost more than 5 but less than 20 times
+        let (slow, _) = log_cost_mb(5, 60);
+        assert!((slow * 60.0 - hour).abs() < 1e-9);
+        let (big, _) = log_cost_mb(100, 1);
+        assert!(big > hour && big < hour * 20.0);
+        assert_eq!(log_cost_mb(5, 0), log_cost_mb(5, 1), "a zero interval is read as one second");
+        assert_eq!(mb_text(0.04), "under 0.1");
+        assert_eq!(mb_text(0.26), "0.3");
+        assert_eq!(mb_text(2.9), "2.9");
+        assert_eq!(mb_text(68.7), "69");
+    }
+
+    #[test]
+    fn the_log_status_is_told_in_words() {
+        let run = LogStatus { file: Some("/x/hwglance-1.csv".into()), columns: 3, interval_s: 5, error: None };
+        assert_eq!(log_status_text(&run), ("Logging 3 values every 5 s to".to_string(), Some("/x/hwglance-1.csv".to_string())));
+        assert_eq!(log_status_plain(&run), "Logging 3 values every 5 s to /x/hwglance-1.csv");
+        let one = LogStatus { columns: 1, ..run.clone() };
+        assert!(log_status_text(&one).0.starts_with("Logging 1 value every"));
+        let failed = LogStatus { file: None, columns: 0, interval_s: 5, error: Some("cannot create /x: Permission denied".into()) };
+        assert_eq!(log_status_text(&failed), ("cannot create /x: Permission denied".to_string(), None));
+        let waiting = LogStatus { file: None, columns: 0, interval_s: 5, error: None };
+        assert!(log_status_text(&waiting).0.starts_with("Logging starts in a moment"));
+        assert_eq!(log_interval_label(1), "1 s (every sample)");
+        assert_eq!(log_interval_label(30), "30 s");
+        assert_eq!(log_pace_note(1, 1000), None);
+        assert_eq!(log_pace_note(5, 2000), None);
+        assert!(log_pace_note(1, 2000).unwrap().contains("every 2.0 s"));
+        let demo = crate::demo::Demo::new().snapshot(5.0);
+        let n = log_reading_count(&demo);
+        assert!(n > 20 && n == demo.sensors.iter().flat_map(|g| &g.sections).flat_map(|s| &s.readings).count());
+        assert!(demo.logging.is_none(), "the demo never shows the logging chip");
     }
 
     #[test]
