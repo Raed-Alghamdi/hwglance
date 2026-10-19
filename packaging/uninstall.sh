@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Remove everything packaging/install.sh installed.
 #   packaging/uninstall.sh [--no-helper]
-# Leaves ~/.config/hwglance (your config) alone. Root steps (only the helper) run through
-# ${SUDO:-sudo}, for example SUDO=doas packaging/uninstall.sh.
+# Leaves ~/.config/hwglance (your config) and ~/.local/state/hwglance (logs, crash.log) alone.
+# Root steps (only the helper) run through ${SUDO:-sudo}, for example SUDO=doas packaging/uninstall.sh.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -29,6 +29,7 @@ A short runbook for the one person who maintains this project.
 ## 3. Monthly routine (about 30 minutes)
 
 1. `cargo update`, then `scripts/check.sh` and `cargo deny check`. Commit `Cargo.lock` if all is well.
+   - A new unmaintained or unsound advisory fails `cargo deny`. When it is not a vulnerability and has no fix yet, add it to `ignore` in `deny.toml` with the dependency path and when to remove it. The three zbus 5 entries (RUSTSEC-2026-0370, 0371, 0372, reached through egui's accesskit) go when `cargo tree -i zvariant` shows accesskit on zbus 6.
 2. Review open issues and pull requests.
 3. Merge the Dependabot PRs.
 4. Release if anything user-facing changed.

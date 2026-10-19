@@ -6,10 +6,18 @@
 targets = ["x86_64-unknown-linux-gnu"]
 
 [advisories]
-# Known vulnerabilities always fail the check. Unmaintained and unsound crates warn.
+# Known vulnerabilities always fail the check. With "all", unmaintained and unsound advisories
+# are checked for every crate in the tree (not only direct dependencies) and fail it too: fix
+# the dependency, or ignore the advisory below with a reason and when to remove the entry.
 unmaintained = "all"
 unsound = "all"
 yanked = "deny"
+ignore = [
+    # Not vulnerabilities, only notices that the crates were merged into zbus 6.
+    { id = "RUSTSEC-2026-0370", reason = "zvariant is unmaintained (merged into zbus 6); only via eframe > egui-winit > accesskit_winit > accesskit_unix > zbus 5; remove when accesskit moves to zbus 6" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names is unmaintained (merged into zbus 6); only via eframe > egui-winit > accesskit_winit > accesskit_unix > zbus 5; remove when accesskit moves to zbus 6" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive is unmaintained (merged into zbus 6); only via eframe > egui-winit > accesskit_winit > accesskit_unix > zbus 5; remove when accesskit moves to zbus 6" },
+]
 
 [licenses]
 # The project is GPL-3.0-or-later, so every dependency must be compatible with it.
