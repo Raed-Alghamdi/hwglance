@@ -1544,7 +1544,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hwglance"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "eframe",
  "egui",
@@ -1562,7 +1562,7 @@ dependencies = [
 
 [[package]]
 name = "hwglance-helper"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "hwglance-proto",
  "serde",
@@ -1571,7 +1571,7 @@ dependencies = [
 
 [[package]]
 name = "hwglance-proto"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1579,7 +1579,7 @@ dependencies = [
 
 [[package]]
 name = "hwglanced"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "flate2",
  "hwglance-proto",

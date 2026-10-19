@@ -4,6 +4,8 @@ All notable changes to HW Glance are listed here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-19
+
 ### Added
 
 - CSV logging of readings. Right-click a reading and tick Log to file, or tick Log all hardware readings in the new Settings, Logging tab, which also sets the interval, the folder (with a folder chooser when `zenity` or `kdialog` is installed), shows the size to expect and has Stop logging with Undo. The collector writes the log, so it goes on while the window is closed and after you log in. Values are rounded the way the window shows them, and finished files are gzipped to `.csv.gz` by default (Compress finished files; about a quarter of the size). An optional age limit (Delete logs older than: 7, 30, 90 or 365 days) deletes old log files for good. Settings, Logging also shows what the folder holds. A new file starts when the logged values change and each day. The top bar shows a Logging chip while it runs, or Log error when the file cannot be written. Details in the README. The protocol version is now 6 (`Snapshot::logging`), so a window tells an older collector to restart.
@@ -58,7 +60,8 @@ First release.
 - Sensors are read only, and nothing leaves your machine.
 - Packages: an Arch package and a generic x86_64 Linux tarball.
 
-[Unreleased]: https://github.com/Raed-Alghamdi/hwglance/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/Raed-Alghamdi/hwglance/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Raed-Alghamdi/hwglance/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/Raed-Alghamdi/hwglance/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Raed-Alghamdi/hwglance/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Raed-Alghamdi/hwglance/releases/tag/v0.1.0
