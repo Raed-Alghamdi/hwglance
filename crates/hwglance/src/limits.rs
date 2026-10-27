@@ -37,6 +37,17 @@ pub fn find_thermal(g: &SensorGroup) -> Option<&Reading> {
         .find(|r| r.unit == Unit::Flag && r.id.ends_with("/throttle/thermal"))
 }
 
+/// Can this flag mean trouble? Only when the collector gives it a limit (`crit`, or `warn`, set to 1 for
+/// thermal throttling). A flag without one, like "Power limit reached", is normal operation.
+pub fn can_alarm(r: &Reading) -> bool {
+    r.crit.is_some() || r.warn.is_some()
+}
+
+/// Is the flag on and past its limit right now?
+pub fn alarming_now(r: &Reading) -> bool {
+    r.value.is_some_and(|v| r.crit.is_some_and(|c| v >= c) || r.warn.is_some_and(|w| v >= w))
+}
+
 /// Has the flag been on at any time since the stats started?
 pub fn happened(r: &Reading) -> bool {
     r.events.is_some_and(|e| e.count > 0) || r.stats.is_some_and(|s| s.max >= 0.5)
@@ -65,6 +76,11 @@ pub fn pill_text(t: Throttle) -> String {
 /// Text in the bar's place on a flag row, and whether the event is recent (warning colour; an
 /// older one keeps its words in quiet ink).
 pub fn flag_detail(r: &Reading, stats_since_ms: u64, now_ms: u64) -> (String, bool) {
+    let (text, recent) = flag_detail_text(r, stats_since_ms, now_ms);
+    (text, recent && can_alarm(r))
+}
+
+fn flag_detail_text(r: &Reading, stats_since_ms: u64, now_ms: u64) -> (String, bool) {
     if !happened(r) {
         return (format!("never since {}", fmt_clock(stats_since_ms)), false);
     }
@@ -88,7 +104,12 @@ mod tests {
     use super::*;
     use hwglance_proto::{FlagEvents, Section, Stats};
 
+    /// The thermal flag, which the collector marks with `crit` 1.
     fn flag(value: f64, max: f64, events: Option<FlagEvents>) -> Reading {
+        Reading { crit: Some(1.0), ..plain_flag(value, max, events) }
+    }
+
+    fn plain_flag(value: f64, max: f64, events: Option<FlagEvents>) -> Reading {
         Reading {
             id: "cpu/throttle/thermal".into(),
             label: "Thermal throttling".into(),
@@ -173,6 +194,20 @@ mod tests {
         let (text, hot) = flag_detail(&past, 0, 1_700_000_100_000 + 60_000);
         assert!(text.starts_with("3x, last "));
         assert!(hot);
+    }
+
+    #[test]
+    fn only_a_flag_with_a_limit_can_alarm() {
+        let thermal = flag(1.0, 1.0, None);
+        assert!(can_alarm(&thermal) && alarming_now(&thermal));
+        assert!(!alarming_now(&flag(0.0, 1.0, None)));
+        // "Power limit reached" has no limit: on is normal operation
+        let power = plain_flag(1.0, 1.0, None);
+        assert!(!can_alarm(&power) && !alarming_now(&power));
+        let ev = Some(FlagEvents { count: 3, last_unix_ms: NOW - 3 * MIN, ended_unix_ms: None });
+        assert!(flag_detail(&flag(0.0, 1.0, ev), 0, NOW).1, "a recent thermal event is amber");
+        let (text, recent) = flag_detail(&plain_flag(0.0, 1.0, ev), 0, NOW);
+        assert!(text.starts_with("3x, last ") && !recent, "a recent power event keeps its words in quiet ink");
     }
 
     #[test]

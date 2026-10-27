@@ -4,6 +4,14 @@ All notable changes to HW Glance are listed here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Added
+
+- A Fan duty section on the Motherboard card shows the PWM duty (percent) the board sends each fan header, read from the driver's `pwm` files and labelled like the fan's RPM row. Some fans never report a speed (0 RPM at any duty, for example behind a splitter that does not pass the speed signal on), so the duty is the only reading those fans give. Chips without `pwm` files, such as the ASUS embedded controller, get no duty row. It is read only, like everything else here.
+
+### Fixed
+
+- "Power limit reached" is no longer shown as a warning. Hitting the GPU's power limit is normal operation, but the top bar turned the GPU state red whenever it was Yes. Now only a flag with a limit of its own counts (thermal throttling): the GPU chip, the row's value and the event text in the window stay quiet for the power limit, and its history shows in neutral grey. The row still shows Yes or No with its event history.
+
 ## [0.2.0] - 2026-10-19
 
 ### Added

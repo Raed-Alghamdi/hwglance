@@ -51,6 +51,8 @@ pub struct Fan {
     pub idx: u32,
     pub input: PathBuf,
     pub label: Option<String>,
+    /// `pwm{idx}`, the duty the board sends this header, when the driver has one to read.
+    pub pwm: Option<PathBuf>,
 }
 
 pub struct Chip {
@@ -75,6 +77,9 @@ pub struct FanVal {
     pub idx: u32,
     pub label: Option<String>,
     pub rpm: Option<f64>,
+    /// The PWM duty in percent, for a header with a `pwm` file. Some headers never report a
+    /// speed (rpm stays 0), so this is the only sign of life they give.
+    pub duty: Option<f64>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -158,6 +163,7 @@ pub fn discover() -> Vec<Chip> {
                     idx,
                     input: e.path(),
                     label: read_trim(dir.join(format!("fan{idx}_label"))),
+                    pwm: pwm_file(&dir, idx),
                 });
             }
         }
@@ -173,6 +179,17 @@ pub fn discover() -> Vec<Chip> {
         });
     }
     chips
+}
+
+/// The `pwm{idx}` file of a fan, if it exists and can be read (it is only ever read).
+fn pwm_file(dir: &Path, idx: u32) -> Option<PathBuf> {
+    let p = dir.join(format!("pwm{idx}"));
+    read_num(&p).map(|_| p)
+}
+
+/// A hwmon `pwm` value (0 to 255) as a percentage.
+fn duty_percent(raw: f64) -> f64 {
+    (raw / 255.0 * 100.0).clamp(0.0, 100.0)
 }
 
 pub fn read_chip(c: &Chip) -> ChipVal {
@@ -196,6 +213,7 @@ pub fn read_chip(c: &Chip) -> ChipVal {
                 idx: f.idx,
                 label: f.label.clone(),
                 rpm: read_num(&f.input),
+                duty: f.pwm.as_deref().and_then(read_num).map(duty_percent),
             })
             .collect(),
     }
@@ -211,6 +229,38 @@ mod tests {
         assert_eq!(index_of("temp_input", "temp", "_input"), None);
         assert_eq!(index_of("hwmon7", "hwmon", ""), Some(7));
         assert_eq!(index_of("name", "hwmon", ""), None);
+    }
+
+    #[test]
+    fn a_fan_duty_is_read_from_its_pwm_file_as_a_percentage() {
+        let dir = std::env::temp_dir().join(format!("hwglance-pwm-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("pwm3"), "178\n").unwrap();
+        fs::write(dir.join("pwm4"), "garbage\n").unwrap();
+        // only a readable pwm file counts: fan 2 has none and fan 4's is not a number
+        assert_eq!(pwm_file(&dir, 3), Some(dir.join("pwm3")));
+        assert_eq!(pwm_file(&dir, 2), None);
+        assert_eq!(pwm_file(&dir, 4), None);
+        let fan = Fan { idx: 3, input: dir.join("fan3_input"), label: None, pwm: pwm_file(&dir, 3) };
+        let chip = Chip { name: "nct6799".into(), dev: "nct6775.656".into(), temps: Vec::new(), fans: vec![fan], slow: true };
+        fs::write(dir.join("fan3_input"), "0\n").unwrap();
+        let v = read_chip(&chip);
+        assert_eq!(v.fans[0].rpm, Some(0.0));
+        let duty = v.fans[0].duty.unwrap();
+        assert!((duty - 69.8).abs() < 0.1, "{duty}");
+        // a fan without a pwm file has no duty
+        let bare = Chip { fans: vec![Fan { idx: 3, input: dir.join("fan3_input"), label: None, pwm: None }], ..chip };
+        assert_eq!(read_chip(&bare).fans[0].duty, None);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn duty_percent_spans_zero_to_one_hundred() {
+        assert_eq!(duty_percent(0.0), 0.0);
+        assert_eq!(duty_percent(255.0), 100.0);
+        assert!((duty_percent(153.0) - 60.0).abs() < 1e-9);
+        assert_eq!(duty_percent(300.0), 100.0);
     }
 
     #[test]

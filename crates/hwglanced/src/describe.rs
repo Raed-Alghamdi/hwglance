@@ -269,6 +269,9 @@ fn desc_for(id: &str, label: &str, ctx: &Ctx) -> Option<String> {
     if id.starts_with("board/temp/") && id.ends_with("/temp1") {
         return s("Temperature of the Wi-Fi card.");
     }
+    if id.starts_with("board/fanduty/") {
+        return s("The duty the board sends this fan header (PWM, 100% is full power). Some headers report no speed at all, and then this is the only reading for the fan.");
+    }
     if id == "board/fan/asusec/cpu_opt" {
         return s("Speed of the fan or pump on the CPU_OPT header.");
     }
@@ -409,6 +412,13 @@ fn summary_for(s: &Section) -> Option<Reading> {
             max_of(s, |_| true),
             "Speed of the fastest fan or pump on this motherboard.",
         )),
+        "board/fanduty" => Some(derived(
+            s,
+            "Highest fan duty",
+            Unit::Percent,
+            max_of(s, |_| true),
+            "The highest duty the board sends any fan or pump header.",
+        )),
         "igpu/main" => copy("igpu/main/temp").or_else(|| copy("igpu/main/clock")),
         id if id.starts_with("disk/") && id.ends_with("/io") => {
             let get = |suffix: &str| {
@@ -511,6 +521,8 @@ mod tests {
         );
         assert_eq!(summary_for(&s).unwrap().value, Some(55.0));
         assert!(summary_for(&section("board/fan", vec![])).is_none());
+        let s = section("board/fanduty", vec![r("board/fanduty/nct6799/fan1", 40.0), r("board/fanduty/nct6799/fan3", 70.0)]);
+        assert_eq!(summary_for(&s).unwrap().value, Some(70.0));
     }
 
     #[test]
@@ -551,6 +563,11 @@ mod tests {
             desc_for("board/fan/nct6799/fan1", "Top intake", &Ctx::default())
                 .unwrap()
                 .contains("this motherboard header")
+        );
+        assert!(
+            desc_for("board/fanduty/nct6799/fan3", "Rear", &Ctx::default())
+                .unwrap()
+                .contains("only reading")
         );
         assert!(
             desc_for("disk/S/temp/sensor_1", "Sensor 1", &Ctx::default())

@@ -422,7 +422,9 @@ pub fn paint(p: &Painter, rect: Rect, pal: &Palette, inp: &PopInput) {
     if is_flag {
         for &(a, b) in &view.bands {
             let r = Rect::from_min_max(pos2(tx(a), plot.top()), pos2(tx(b).max(tx(a) + 2.0), plot.bottom()));
-            p.rect_filled(r, 0.0, pal.crit.gamma_multiply(0.45));
+            // red only for a flag that means trouble (thermal throttling), quiet for the rest
+            let band = if inp.thr.crit.is_some() || inp.thr.warn.is_some() { pal.crit } else { pal.ink3 };
+            p.rect_filled(r, 0.0, band.gamma_multiply(0.45));
         }
         if view.bands.is_empty() {
             p.text(plot.center(), Align2::CENTER_CENTER, "Not active in this window", f_minmax(), pal.ink3);

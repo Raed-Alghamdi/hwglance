@@ -400,7 +400,8 @@ pub fn device_state(snap: &Snapshot, s: &Settings, dev: Device) -> DeviceState {
             for r in vs.readings {
                 let Some(v) = r.value else { continue };
                 let (rank, level, mark) = if r.unit == Unit::Flag {
-                    if v < 0.5 {
+                    // only a flag with a limit is trouble: "Power limit reached" is normal operation
+                    if v < 0.5 || !limits::alarming_now(r) {
                         continue;
                     }
                     (3, Level::Crit, THROTTLE_MARK)
@@ -1059,8 +1060,7 @@ impl CellCtx {
 fn paint_cells(p: &egui::Painter, cols: &RowCols, r: &Reading, thr: &Thr, device: Color32, pal: &Palette, num_color: Option<Color32>, cx: &CellCtx) {
     let cy = cols.flag.center().y;
     if r.unit == Unit::Flag {
-        let on = r.value.is_some_and(|v| v >= 0.5);
-        let col = if on { pal.crit } else { num_color.unwrap_or(pal.ink) };
+        let col = if limits::alarming_now(r) { pal.crit } else { num_color.unwrap_or(pal.ink) };
         paint_result(p, cols.result_right, cy, r, col, pal);
         let (text, recent) = limits::flag_detail(r, cx.since_ms, cx.now_ms);
         let left = cols.min.map(|m| m.left()).unwrap_or(cols.result_right + 8.0);
@@ -2362,9 +2362,11 @@ mod tests {
         }
     }
 
+    /// A flag as the collector sends it: thermal throttling carries `crit` 1, the rest no limit.
     fn flag_reading(id: &str, on: bool) -> Reading {
         let mut r = rd(id, if on { 1.0 } else { 0.0 });
         r.unit = Unit::Flag;
+        r.crit = id.ends_with("/throttle/thermal").then_some(1.0);
         r
     }
 
@@ -2401,6 +2403,9 @@ mod tests {
         assert_eq!((st.level, st.mark), (Level::Crit, Some(THROTTLE_MARK)));
         let off = snap_of(vec![state_group("gpu0", vec![flag_reading("gpu0/throttle/thermal", false)])]);
         assert_eq!(device_state(&off, &s, Device::Gpu), DeviceState::normal());
+        // hitting the power limit is normal operation, not a state
+        let power = snap_of(vec![state_group("gpu0", vec![flag_reading("gpu0/throttle/power", true)])]);
+        assert_eq!(device_state(&power, &s, Device::Gpu), DeviceState::normal());
         // several cards of one device (drives) are looked at together
         let snap = snap_of(vec![state_group("disk/a", vec![other.clone()]), state_group("disk/b", vec![warm.clone()])]);
         assert_eq!(device_state(&snap, &s, Device::Drive).target.as_deref(), Some("cpu/temp/tctl"));

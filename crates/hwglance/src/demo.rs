@@ -150,6 +150,8 @@ fn demo_desc(id: &str, label: &str) -> Option<String> {
         "Drive temperature from its SMART data. Sustained values above 70 C can slow the drive down."
     } else if id.starts_with("nvme") {
         "Drive figure from SMART data and the filesystem."
+    } else if id.starts_with("mb/fanduty") {
+        "The duty the board sends this fan header (PWM, 100% is full power). Some headers report no speed at all, and then this is the only reading for the fan."
     } else if id.starts_with("mb/fan") {
         "Fan or pump speed reported by the Super I/O chip. A pump at 0 RPM means the loop has stopped."
     } else if id.starts_with("mb/temp") {
@@ -170,7 +172,7 @@ fn arrange(g: &mut SensorGroup) {
         "cpu" => &["temp", "limits", "power", "usage", "clock", "thread"],
         "gpu0" => &["temp", "limits", "load", "clocks", "fan", "mem", "chips"],
         "memory" => &["temp", "usage", "speed"],
-        "mb" => &["temp", "fan", "volt", "misc"],
+        "mb" => &["temp", "fan", "fanduty", "volt", "misc"],
         id if id.starts_with("nvme") => &["temp", "io", "cap"],
         _ => &[],
     };
@@ -347,6 +349,9 @@ impl Demo {
             crit: None,
         };
         let mut r = self.finish((r, if on { 1.0 } else { 0.0 }));
+        // as in the collector: thermal throttling is trouble, hitting the power limit is not (set
+        // after `finish` so the demo's crossings stay as they were)
+        r.crit = id.ends_with("/throttle/thermal").then_some(1.0);
         r.events = Some(ev);
         r
     }
@@ -628,6 +633,13 @@ impl Demo {
             rd("mb/fan/ch3", "Chassis Fan 3", Unit::Rpm, 1010.0, None, None, None),
         ];
         secs.push(self.section("mb/fan", "Fans", false, rows));
+        let rows = vec![
+            rd("mb/fanduty/cpu", "CPU Fan", Unit::Percent, 35.0 + 30.0 * load, None, None, None),
+            rd("mb/fanduty/pump", "AIO Pump", Unit::Percent, 100.0, None, None, None),
+            rd("mb/fanduty/ch1", "Chassis Fan 1", Unit::Percent, 55.0 + 8.0 * noise("c1", t), None, None, None),
+            rd("mb/fanduty/ch2", "Chassis Fan 2", Unit::Percent, 55.0 + 8.0 * noise("c2", t), None, None, None),
+        ];
+        secs.push(self.section("mb/fanduty", "Fan duty", false, rows));
         let rows = vec![
             rd("mb/volt/12v", "+12V", Unit::Volt, 12.096, None, None, None),
             rd("mb/volt/5v", "+5V", Unit::Volt, 5.040, None, None, None),
@@ -1068,7 +1080,9 @@ mod tests {
         assert!(ev.count >= 2, "two heat windows fall in 1000 s of warm-up: {ev:?}");
         assert!(ev.last_unix_ms > 0);
         assert!(thermal.stats.unwrap().max >= 1.0);
-        assert!(s.sensors.iter().flat_map(|g| g.sections.iter()).flat_map(|x| x.readings.iter()).any(|r| r.id == "gpu0/throttle/power"));
+        assert_eq!(thermal.crit, Some(1.0), "thermal throttling is trouble");
+        let power = s.sensors.iter().flat_map(|g| g.sections.iter()).flat_map(|x| x.readings.iter()).find(|r| r.id == "gpu0/throttle/power").unwrap();
+        assert_eq!(power.crit, None, "the power limit is normal operation");
         assert_eq!(s.history_minutes, 30);
         // while the window is on, the flag reads yes and the temperature is high
         let mut d2 = Demo::new();

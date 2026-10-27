@@ -40,7 +40,7 @@ Optional, each adds readings or features:
 | NVIDIA driver (NVML) | GPU load, temperature, clocks, VRAM, power and fan |
 | [LACT](https://github.com/ilya-zlobintsev/LACT) daemon | GPU hotspot and VRAM temperatures, fan RPM and core voltage (the NVIDIA driver hides them on Linux) |
 | The root helper (`hwglance-helper`, installed by default) | CPU package power (RAPL) and memory speed and modules (SMBIOS), which only root can read |
-| Board hwmon drivers (`nct6775`, `asus-ec-sensors`) | Motherboard temperatures and fans |
+| Board hwmon drivers (`nct6775`, `asus-ec-sensors`) | Motherboard temperatures, fan speeds and fan duty (PWM percent) |
 | `notify-send` (libnotify) and a notification daemon | Notifications when a limit is crossed |
 | Hyprland | Window titles in the process list, and the maximized state |
 | Omarchy | The bar widget, the theme and font, and the notification's Open button |

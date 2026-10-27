@@ -852,6 +852,7 @@ fn board_group(i: &Inputs) -> SensorGroup {
     }
 
     let mut fans = Vec::new();
+    let mut duties = Vec::new();
     // Super I/O chips first, then the board's embedded controller and the laptop fan drivers
     let mut fan_chips: Vec<&ChipVal> = i.chips.iter().filter(|c| hwmon::has_board_fans(&c.name)).collect();
     fan_chips.sort_by_key(|c| !hwmon::is_superio(&c.name));
@@ -867,6 +868,14 @@ fn board_group(i: &Inputs) -> SensorGroup {
                 .map(str::to_string)
                 .or_else(|| f.label.clone())
                 .unwrap_or_else(|| format!("Fan {}", f.idx));
+            if f.duty.is_some() {
+                duties.push(rd(
+                    format!("board/fanduty/{chip_name}/{}", slug(&key)),
+                    label.clone(),
+                    Unit::Percent,
+                    f.duty,
+                ));
+            }
             fans.push(rd(
                 format!("board/fan/{chip_name}/{}", slug(&key)),
                 label,
@@ -889,6 +898,7 @@ fn board_group(i: &Inputs) -> SensorGroup {
                 superio,
             ),
             sec("board/fan", "Fans", false, fans),
+            sec("board/fanduty", "Fan duty", false, duties),
         ],
     }
 }
@@ -1149,16 +1159,19 @@ mod tests {
                     idx: 1,
                     label: None,
                     rpm: Some(1100.0),
+                    duty: None,
                 },
                 FanVal {
                     idx: 3,
                     label: None,
                     rpm: Some(0.0),
+                    duty: None,
                 },
                 FanVal {
                     idx: 7,
                     label: None,
                     rpm: Some(0.0),
+                    duty: None,
                 },
             ],
         }];
@@ -1200,7 +1213,11 @@ mod tests {
     }
 
     fn fan(idx: u32, label: Option<&str>, rpm: f64) -> FanVal {
-        FanVal { idx, label: label.map(Into::into), rpm: Some(rpm) }
+        FanVal { idx, label: label.map(Into::into), rpm: Some(rpm), duty: None }
+    }
+
+    fn fan_duty(idx: u32, label: Option<&str>, rpm: f64, duty: f64) -> FanVal {
+        FanVal { duty: Some(duty), ..fan(idx, label, rpm) }
     }
 
     #[test]
@@ -1241,6 +1258,63 @@ mod tests {
         let g = board_group(&base_inputs(&cfg, &cpu, &chips));
         let labels: Vec<&str> = g.sections[2].readings.iter().map(|r| r.label.as_str()).collect();
         assert_eq!(labels, ["Top", "Pump", "CPU OPT"]);
+    }
+
+    fn duty_rows(g: &SensorGroup) -> Vec<(&str, &str, Option<f64>)> {
+        let sec = g.sections.iter().find(|s| s.id == "board/fanduty").expect("fan duty section");
+        sec.readings.iter().map(|r| (r.id.as_str(), r.label.as_str(), r.value)).collect()
+    }
+
+    #[test]
+    fn fan_duty_lists_the_fans_that_have_a_duty_under_the_same_labels() {
+        let cpu = CpuVal::default();
+        let chips = vec![
+            ChipVal {
+                name: "nct6799".into(),
+                temps: vec![tv("SYSTIN", 43.0)],
+                // fan3 never reports a speed but has a duty; fan4 is an empty header (no speed, no
+                // name); fan2 has a speed and no duty file
+                fans: vec![fan_duty(1, None, 1100.0, 40.0), fan(2, None, 900.0), fan_duty(3, None, 0.0, 70.0), fan_duty(4, None, 0.0, 30.0), fan_duty(7, None, 2700.0, 100.0)],
+                ..Default::default()
+            },
+            // the board's embedded controller has no pwm file: a fan row and no duty row
+            ChipVal { name: "asusec".into(), fans: vec![fan(1, Some("CPU_Opt"), 0.0)], ..Default::default() },
+        ];
+        let cfg = Config::for_test(&[("nct6799/fan3", "Rear"), ("nct6799/fan7", "Pump")], None);
+        let g = board_group(&base_inputs(&cfg, &cpu, &chips));
+        let ids: Vec<&str> = g.sections.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["board/temp", "board/superio", "board/fan", "board/fanduty"]);
+        let sec = &g.sections[3];
+        assert_eq!((sec.title.as_str(), sec.collapsed_by_default), ("Fan duty", false));
+        assert!(sec.readings.iter().all(|r| r.unit == Unit::Percent && r.warn.is_none() && r.crit.is_none()));
+        // the same label as the fan's RPM row (config, else driver, else "Fan N"), and the skip rule
+        // of the RPM rows: fan4 is hidden in both lists
+        assert_eq!(
+            duty_rows(&g),
+            [
+                ("board/fanduty/nct6799/fan1", "Fan 1", Some(40.0)),
+                ("board/fanduty/nct6799/fan3", "Rear", Some(70.0)),
+                ("board/fanduty/nct6799/fan7", "Pump", Some(100.0)),
+            ]
+        );
+        for (id, label, _) in duty_rows(&g) {
+            let rpm_id = id.replace("fanduty", "fan");
+            assert_eq!(g.sections[2].readings.iter().find(|r| r.id == rpm_id).map(|r| r.label.as_str()), Some(label), "{id}");
+        }
+        assert!(g.sections[2].readings.iter().any(|r| r.id == "board/fan/asusec/cpu_opt"));
+        // a driver label names the duty row too
+        let chips = vec![ChipVal { name: "it8688".into(), fans: vec![fan_duty(2, Some("Pump"), 0.0, 55.0)], ..Default::default() }];
+        let g = board_group(&base_inputs(&cfg, &cpu, &chips));
+        assert_eq!(duty_rows(&g), [("board/fanduty/it8688/pump", "Pump", Some(55.0))]);
+    }
+
+    #[test]
+    fn no_pwm_files_means_no_fan_duty_section_readings() {
+        let cfg = cfg();
+        let cpu = CpuVal::default();
+        let chips = vec![ChipVal { name: "asusec".into(), fans: vec![fan(1, Some("CPU_Opt"), 0.0)], ..Default::default() }];
+        let g = board_group(&base_inputs(&cfg, &cpu, &chips));
+        assert!(g.sections.iter().find(|s| s.id == "board/fanduty").is_none_or(|s| s.readings.is_empty()));
     }
 
     fn cpu_with_temps(model: &str, chips: &[ChipVal], cfg: &Config, cpu: CpuVal) -> Vec<Reading> {

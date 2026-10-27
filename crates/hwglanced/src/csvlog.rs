@@ -659,6 +659,22 @@ mod tests {
     }
 
     #[test]
+    fn a_fan_duty_column_is_told_from_the_fans_speed_by_its_unit() {
+        let snap = snap_at(
+            1,
+            vec![(
+                "Motherboard",
+                "Fans",
+                vec![reading("board/fan/nct6799/fan3", "Rear", Unit::Rpm, Some(0.0)), reading("board/fanduty/nct6799/fan3", "Rear", Unit::Percent, Some(69.8))],
+            )],
+        );
+        let (found, index) = gather(&snap);
+        let all = LogPrefs { all: true, ..LogPrefs::default() };
+        let names: Vec<String> = columns(&all, &found, &index).into_iter().map(|c| c.name).collect();
+        assert_eq!(names, ["Motherboard Rear [RPM]", "Motherboard Rear [%]"]);
+    }
+
+    #[test]
     fn a_ticked_log_writes_its_columns_in_tick_order_with_the_time_columns_first() {
         let dir = tmpdir("ticked");
         let (mut log, now) = running();
