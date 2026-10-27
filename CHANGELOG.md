@@ -4,6 +4,8 @@ All notable changes to HW Glance are listed here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-27
+
 ### Added
 
 - A Fan duty section on the Motherboard card shows the PWM duty (percent) the board sends each fan header, read from the driver's `pwm` files and labelled like the fan's RPM row. Some fans never report a speed (0 RPM at any duty, for example behind a splitter that does not pass the speed signal on), so the duty is the only reading those fans give. Chips without `pwm` files, such as the ASUS embedded controller, get no duty row. It is read only, like everything else here.
@@ -68,7 +70,8 @@ First release.
 - Sensors are read only, and nothing leaves your machine.
 - Packages: an Arch package and a generic x86_64 Linux tarball.
 
-[Unreleased]: https://github.com/Raed-Alghamdi/hwglance/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Raed-Alghamdi/hwglance/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Raed-Alghamdi/hwglance/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Raed-Alghamdi/hwglance/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/Raed-Alghamdi/hwglance/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Raed-Alghamdi/hwglance/compare/v0.1.0...v0.1.1
