@@ -132,9 +132,9 @@ pub fn nav_step(items: &[NavKey], cur: Option<&NavKey>, delta: isize) -> Option<
 /// The id of a card's header (`None`) or of one of its rows.
 pub fn nav_id(card: &str, key: Option<&NavKey>) -> egui::Id {
     match key {
-        None => egui::Id::new(("nav-head", card)),
-        Some(NavKey::Section(sec)) => egui::Id::new(("nav-sec", card, sec.as_str())),
-        Some(NavKey::Reading(r)) => egui::Id::new(("nav-row", card, r.as_str())),
+        None => egui::Id::unique(("nav-head", card)),
+        Some(NavKey::Section(sec)) => egui::Id::unique(("nav-sec", card, sec.as_str())),
+        Some(NavKey::Reading(r)) => egui::Id::unique(("nav-row", card, r.as_str())),
     }
 }
 
@@ -466,7 +466,7 @@ pub fn with_placeholder_cards(snap: &Snapshot) -> Option<Snapshot> {
 fn source_note(ui: &mut Ui, pal: &Palette, text: &str, w: f32) {
     let g = ui.painter().layout(text.to_string(), f_small(), pal.ink2, (w - 36.0).max(80.0));
     let (rect, resp) = ui.allocate_exact_size(vec2(w, g.size().y + 10.0), Sense::hover());
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, text));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, text));
     if ui.is_rect_visible(rect) {
         ui.painter().circle_filled(pos2(rect.left() + 16.0, rect.top() + 5.0 + g.size().y.min(16.0) / 2.0), 4.0, pal.warn);
         ui.painter().galley(pos2(rect.left() + 28.0, rect.top() + 5.0), g, pal.ink2);
@@ -801,7 +801,7 @@ pub fn show(ui: &mut Ui, v: &mut SensorView, avail: f32) {
                 // the line stays thin; the hit area is 24 px wide, centred on the gap
                 let handle = Rect::from_min_max(pos2(rect.right() - 2.0, rect.top()), pos2(rect.right() + COL_GAP - 2.0, rect.bottom()));
                 let hit = Rect::from_center_size(handle.center(), vec2(handle.width().max(crate::theme::MIN_HIT), handle.height()));
-                let resp = ui.interact(hit, egui::Id::new(("col-resize", ci)), Sense::drag());
+                let resp = ui.interact(hit, egui::Id::unique(("col-resize", ci)), Sense::drag());
                 a11y::publish(&resp, || {
                     Spoken::new(egui::accesskit::Role::Splitter, format!("Resize column {}", ci + 1))
                         .described("Drag, or press Left and Right to change the width by 4 pixels, with Shift by 32. Home restores the default width.")
@@ -1270,7 +1270,7 @@ fn card(ui: &mut Ui, v: &mut SensorView, fr: &mut FrameRec, g: &SensorGroup, w: 
             };
             if v.edit {
                 let grip_rect = Rect::from_min_size(rect.left_top(), vec2(28.0, head_h));
-                grip(ui, grip_rect, egui::Id::new(("grip-card", &g.id)), Dnd::Card(g.id.clone()), pal, || format!("Move the {} card", card_title()));
+                grip(ui, grip_rect, egui::Id::unique(("grip-card", &g.id)), Dnd::Card(g.id.clone()), pal, || format!("Move the {} card", card_title()));
             }
             if resp.clicked() {
                 toggle_card(v.s, &g.id);
@@ -1322,7 +1322,7 @@ fn card(ui: &mut Ui, v: &mut SensorView, fr: &mut FrameRec, g: &SensorGroup, w: 
     let band = Rect::from_min_size(pos2(head_rect.left(), y), vec2(head_rect.width(), band_h));
     let pinned = Rect::from_min_size(band.min, head_rect.size());
     // the pinned copy is a pointer target only: the real header is the Tab stop
-    let resp = ui.interact(pinned, egui::Id::new(("sticky-head", &g.id)), Sense::CLICK);
+    let resp = ui.interact(pinned, egui::Id::unique(("sticky-head", &g.id)), Sense::CLICK);
     ui.painter().rect_filled(band, 0.0, pal.panel);
     let cut = paint_header(ui.painter(), pal, pinned, resp.hovered(), true, &info);
     if let Some(layout) = caption {
@@ -1411,7 +1411,7 @@ fn section(
     let sh = row_h();
     let here = cursor_on(v, &g.id, true, &sec.id);
     let (_, rect) = ui.allocate_space(vec2(w, sh));
-    let resp = ui.interact(rect, egui::Id::new(("nav-sec", g.id.as_str(), sec.id.as_str())), stop_sense(here));
+    let resp = ui.interact(rect, egui::Id::unique(("nav-sec", g.id.as_str(), sec.id.as_str())), stop_sense(here));
     let summary = section_summary(sec, &v.s.sensors.summary_overrides);
     // a watched summary keeps the watch treatment of its own row while the section is collapsed
     let watched = collapsed && summary_watched(sec, v.s);
@@ -1479,7 +1479,7 @@ fn section(
     });
     if v.edit {
         let grip_rect = Rect::from_min_size(rect.left_top() + vec2(2.0, 0.0), vec2(GRIP_W, rect.height()));
-        grip(ui, grip_rect, egui::Id::new(("grip-sec", &sec.id)), Dnd::Section { card: g.id.clone(), id: sec.id.clone() }, pal, || format!("Move the section {}", sec.title));
+        grip(ui, grip_rect, egui::Id::unique(("grip-sec", &sec.id)), Dnd::Section { card: g.id.clone(), id: sec.id.clone() }, pal, || format!("Move the section {}", sec.title));
         fr.sections.push((g.id.clone(), sec.id.clone(), rect));
     }
     if collapsed && !v.edit && !resp.context_menu_opened() {
@@ -1604,7 +1604,7 @@ fn reading_row(
     let pal = v.pal;
     let here = cursor_on(v, &g.id, false, &r.id);
     let (_, rect) = ui.allocate_space(vec2(w, row_h()));
-    let resp = ui.interact(rect, egui::Id::new(("nav-row", g.id.as_str(), r.id.as_str())), stop_sense(here));
+    let resp = ui.interact(rect, egui::Id::unique(("nav-row", g.id.as_str(), r.id.as_str())), stop_sense(here));
     let watched = v.s.is_highlighted(&r.id);
     let thr = effective(v.snap, r);
     let label_left = if v.edit { 38.0 } else { 24.0 };
@@ -1651,7 +1651,7 @@ fn reading_row(
     });
     if v.edit {
         let grip_rect = Rect::from_min_size(rect.left_top() + vec2(4.0, 0.0), vec2(GRIP_W, rect.height()));
-        grip(ui, grip_rect, egui::Id::new(("grip-row", &r.id)), Dnd::Reading { section: sec.id.clone(), id: r.id.clone() }, pal, || format!("Move {}", r.label));
+        grip(ui, grip_rect, egui::Id::unique(("grip-row", &r.id)), Dnd::Reading { section: sec.id.clone(), id: r.id.clone() }, pal, || format!("Move {}", r.label));
         fr.rows.push((sec.id.clone(), r.id.clone(), rect));
     } else if visible {
         if resp.hovered() && !resp.context_menu_opened() {
@@ -1818,7 +1818,7 @@ pub fn threshold_editor(ui: &mut Ui, pal: &Palette, snap: &Snapshot, pending: &P
     ui.add_enabled_ui(!locked, |ui| {
         ui.scope(|ui| {
             ui.visuals_mut().widgets.inactive.bg_stroke = Stroke::new(1.0, pal.control());
-            egui::Grid::new(ui.id().with("threshold-fields")).num_columns(2).show(ui, |ui| {
+            egui::Grid::new(ui.scope_id().with("threshold-fields")).num_columns(2).show(ui, |ui| {
                 for (label, is_warn) in [("Warning", true), ("Critical", false)] {
                     let slot = if is_warn { &mut edit.warn } else { &mut edit.crit };
                     let mut on = slot.is_some();

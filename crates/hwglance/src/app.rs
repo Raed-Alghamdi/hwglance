@@ -1178,7 +1178,7 @@ impl App {
             return;
         }
 
-        let search_id = egui::Id::new(SEARCH_ID);
+        let search_id = egui::Id::unique(SEARCH_ID);
         if find {
             self.focus_search = true;
         }
@@ -1223,7 +1223,7 @@ impl App {
         // A card's Tab stop and the table header own the arrow keys (and Delete) while they have
         // the keyboard, so a key that walks a card never also moves the process selection.
         if let Some(id) = ctx.memory(|m| m.focused())
-            && (self.sensor_keys(ctx, id) || id == egui::Id::new(crate::procs::HEADER_ID))
+            && (self.sensor_keys(ctx, id) || id == egui::Id::unique(crate::procs::HEADER_ID))
         {
             return;
         }
@@ -1233,12 +1233,12 @@ impl App {
         // The process keys (arrows, Delete, Esc) act when nothing has the keyboard or the list does;
         // on a button, a checkbox or the like they are left to it (Delete must never end a task
         // because Tab happened to stop on Hide), and an open menu has the keys.
-        let list_id = egui::Id::new(crate::procs::LIST_ID);
+        let list_id = egui::Id::unique(crate::procs::LIST_ID);
         if ctx.memory(|m| m.focused()).is_some_and(|f| f != list_id) || egui::Popup::is_any_open(ctx) {
             return;
         }
         // Enter on the process list opens or closes the selected group.
-        if ctx.memory(|m| m.has_focus(egui::Id::new(crate::procs::LIST_ID)))
+        if ctx.memory(|m| m.has_focus(egui::Id::unique(crate::procs::LIST_ID)))
             && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter))
             && let Some(id) = self.selection.clone()
         {
@@ -1491,7 +1491,7 @@ impl App {
         // The split handle is 12 px of layout with a thin grip, and 24 px of hit area: 6 px more
         // above and below. It is made after both neighbours so it wins those pixels.
         let hit = handle_rect.expand2(vec2(0.0, (theme::MIN_HIT - handle_h) / 2.0));
-        let resp = ui.interact(hit, egui::Id::new("split-handle"), Sense::click_and_drag());
+        let resp = ui.interact(hit, egui::Id::unique("split-handle"), Sense::click_and_drag());
         let spoken_h = panel_h;
         a11y::publish(&resp, || {
             Spoken::new(egui::accesskit::Role::Splitter, "Resize the process panel")
@@ -1672,7 +1672,7 @@ impl App {
         // (not toward the sensors, whose scroll bar sits against the handle). Made after the
         // panel so it wins them.
         let hit = egui::Rect::from_min_max(handle_rect.min, pos2(handle_rect.right() + (theme::MIN_HIT - handle_w), handle_rect.bottom()));
-        let resp = ui.interact(hit, egui::Id::new("split-handle-right"), Sense::click_and_drag());
+        let resp = ui.interact(hit, egui::Id::unique("split-handle-right"), Sense::click_and_drag());
         a11y::publish(&resp, || {
             Spoken::new(egui::accesskit::Role::Splitter, "Resize the process panel")
                 .described("Left and Right move the divider by 4 pixels, with Shift by 32. Home restores the default width. Double-click or Ctrl+E switches between compact and expanded.")
@@ -1904,7 +1904,7 @@ impl App {
             history_minutes: minutes,
             crossing,
         };
-        let area = egui::Area::new(egui::Id::new("history-popover"))
+        let area = egui::Area::new(egui::Id::unique("history-popover"))
             .order(egui::Order::Tooltip)
             .fixed_pos(pos)
             .interactable(pinned)
@@ -2002,7 +2002,7 @@ impl App {
                 // A double-click on an empty part of the bar maximizes or restores, as on a title
                 // bar. It is made first, so every control drawn over it wins its own clicks, and
                 // it is no Tab stop (the buttons are).
-                let bar = ui.interact(ui.max_rect().expand2(vec2(16.0, 8.0)), egui::Id::new("top-bar-empty"), Sense::CLICK);
+                let bar = ui.interact(ui.max_rect().expand2(vec2(16.0, 8.0)), egui::Id::unique("top-bar-empty"), Sense::CLICK);
                 if bar.double_clicked() {
                     self.win.toggle_maximize(ui.ctx());
                 }
@@ -2344,7 +2344,7 @@ impl App {
         let frame = egui::Frame::popup(&ctx.global_style()).inner_margin(Margin::same(16));
         // It opens just above the process panel's action row, whose buttons asked for it (centred
         // when the panel is not on screen), and the dark window gets a heavier scrim.
-        let id = egui::Id::new("kill-modal");
+        let id = egui::Id::unique("kill-modal");
         let mut modal = egui::Modal::new(id).frame(frame).backdrop_color(pal.scrim());
         if let Some(r) = self.actions_rect {
             modal = modal.area(

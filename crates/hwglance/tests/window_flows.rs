@@ -669,7 +669,7 @@ fn in_edit_mode_the_tooltip_stays_because_the_popover_is_off() {
 // ---------------------------------------------------------------------------
 
 fn settings_rect(h: &mut H) -> egui::Rect {
-    h.ctx.memory(|m| m.area_rect(egui::Id::new("settings-window"))).expect("the settings window is shown")
+    h.ctx.memory(|m| m.area_rect(egui::Id::unique("settings-window"))).expect("the settings window is shown")
 }
 
 #[test]

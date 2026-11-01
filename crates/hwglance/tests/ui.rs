@@ -637,14 +637,14 @@ fn card_headers_stay_pinned_while_their_rows_scroll() {
     assert!(app(&mut h).sticky_heads.is_empty(), "nothing is pinned at the top");
     h.hover_at(pos2(300.0, 200.0));
     h.run_steps(2);
-    h.event(egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, -260.0), modifiers: egui::Modifiers::NONE, phase: egui::TouchPhase::Move });
+    h.event(egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, -260.0), modifiers: egui::Modifiers::NONE, phase: egui::TouchPhase::Move, source: egui::MouseWheelSource::Unknown });
     h.run_steps(4);
     let a = app(&mut h);
     assert!(!a.sticky_heads.is_empty(), "scrolled rows have their card header above them");
     let top = a.card_rects.iter().filter(|(id, _)| a.sticky_heads.contains(id)).map(|(_, r)| r.top()).fold(f32::MAX, f32::min);
     assert!(top < 0.0, "the pinned cards' real headers are scrolled away ({top})");
     // scrolling back brings the real headers back
-    h.event(egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, 600.0), modifiers: egui::Modifiers::NONE, phase: egui::TouchPhase::Move });
+    h.event(egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, 600.0), modifiers: egui::Modifiers::NONE, phase: egui::TouchPhase::Move, source: egui::MouseWheelSource::Unknown });
     h.run_steps(4);
     assert!(app(&mut h).sticky_heads.is_empty());
 }

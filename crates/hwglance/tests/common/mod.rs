@@ -265,6 +265,7 @@ pub fn popover_harness(name: &str, size: (f32, f32), settings: Option<Settings>,
         delta: egui::vec2(0.0, -SCROLL_PX),
         modifiers: egui::Modifiers::NONE,
         phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Unknown,
     });
     h.run_steps(4);
     assert!(app(&mut h).sticky_heads.contains(&head.to_string()), "pinned: {:?}", app(&mut h).sticky_heads);
