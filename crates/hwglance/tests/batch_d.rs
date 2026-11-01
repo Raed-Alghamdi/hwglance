@@ -286,7 +286,7 @@ fn shift_f10_opens_the_menu_of_the_focused_row_and_returns_the_focus() {
     // the process list: the menu of the selected process (a group row, not a class row)
     app(&mut h).move_selection(1);
     app(&mut h).move_selection(1);
-    h.ctx.memory_mut(|m| m.request_focus(egui::Id::new(hwglance::procs::LIST_ID)));
+    h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique(hwglance::procs::LIST_ID)));
     h.run_steps(3);
     shift(&mut h, Key::F10);
     assert!(h.query_by_label("Copy PID").is_some() && h.query_by_label("Copy command line").is_some(), "the process menu");
@@ -336,7 +336,7 @@ fn the_focus_ring_is_two_pixels_of_ink_one_pixel_off_in_both_palettes() {
         assert!(is_ink(&img, row.center().x, row.top() + 1.5), "{name}: the ring on a row");
         // the process list: the ring is on its selected row, here the first
         app(&mut h).move_selection(1);
-        h.ctx.memory_mut(|m| m.request_focus(egui::Id::new(hwglance::procs::LIST_ID)));
+        h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique(hwglance::procs::LIST_ID)));
         h.run_steps(3);
         let list = app(&mut h).procs_list_rect;
         let img = h.render().expect("render");
@@ -518,10 +518,10 @@ fn renders_of_the_batch() {
         press(&mut h, Key::Escape);
         app(&mut h).move_selection(1);
         app(&mut h).move_selection(1);
-        h.ctx.memory_mut(|m| m.request_focus(egui::Id::new(hwglance::procs::LIST_ID)));
+        h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique(hwglance::procs::LIST_ID)));
         h.run_steps(3);
         save(&mut h, &format!("d6-focus-process-list-{name}.png"));
-        h.ctx.memory_mut(|m| m.request_focus(egui::Id::new(hwglance::procs::HEADER_ID)));
+        h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique(hwglance::procs::HEADER_ID)));
         h.run_steps(3);
         press(&mut h, Key::ArrowRight);
         press(&mut h, Key::ArrowRight);

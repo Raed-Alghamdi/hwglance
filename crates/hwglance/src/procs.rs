@@ -651,7 +651,7 @@ pub fn column_checklist(ui: &mut Ui, saved: &[String]) -> Option<Vec<String>> {
 
 /// The header's right-click menu: the column checklist, which stays open while boxes are ticked.
 fn header_menu(resp: &egui::Response, rect: Rect, by_key: bool, saved: &[String], out: &mut Option<Vec<String>>) {
-    let refocus = egui::Id::new(HEADER_ID);
+    let refocus = egui::Id::unique(HEADER_ID);
     ui_kit::row_menu(resp, rect, by_key, refocus, |ui| {
         if let Some(c) = column_checklist(ui, saved) {
             *out = Some(c);
@@ -951,7 +951,7 @@ impl App {
                 if search_shown {
                     let width = if narrow { left_w - 8.0 } else { crate::theme::fs(if dock == Dock::Right { 240.0 } else { 340.0 }).min(left_w - 80.0) };
                     let te = egui::TextEdit::singleline(&mut self.filter)
-                        .id(egui::Id::new(SEARCH_ID))
+                        .id(egui::Id::unique(SEARCH_ID))
                         .hint_text(if narrow { "Search  ( / )" } else { "Search name, command or PID  ( / )" })
                         .desired_width(width.max(60.0))
                         .char_limit(SEARCH_MAX_CHARS)
@@ -1167,7 +1167,7 @@ impl App {
             ui.painter().rect_filled(hrect, 6.0, pal.header);
             // The header is one Tab stop: Left and Right choose a column, Enter or Space sorts by it,
             // Shift+F10 opens the column checklist (a right click anywhere on the header does too).
-            let bg = ui.interact(hrect, egui::Id::new(HEADER_ID), Sense::click());
+            let bg = ui.interact(hrect, egui::Id::unique(HEADER_ID), Sense::click());
             let (name_r, col_r) = cols.rects(hrect);
             let mut cells: Vec<(SortKey, Rect, bool)> = vec![(SortKey::Name, name_r.shrink2(vec2(12.0, 0.0)), false)];
             cells.extend(col_r.iter().map(|(k, r)| (*k, *r, !left_aligned(*k))));
@@ -1193,7 +1193,7 @@ impl App {
             let sort_key = self.sort_key();
             for (key, r, right) in cells.iter().copied() {
                 // a cell is a pointer target; the header as a whole is the Tab stop
-                let resp = ui.interact(r, egui::Id::new(("proc-hdr", key.as_str())), Sense::CLICK);
+                let resp = ui.interact(r, egui::Id::unique(("proc-hdr", key.as_str())), Sense::CLICK);
                 a11y::publish(&resp, || {
                     let s = Spoken::new(egui::accesskit::Role::ColumnHeader, key.title()).described("Click to sort by this column");
                     if sort_key == key { s.sorted(self.s.processes.sort.descending) } else { s }
@@ -1223,7 +1223,7 @@ impl App {
                         ui.painter().rect(chip, 10.0, Color32::TRANSPARENT, Stroke::new(1.0, pal.rule), egui::StrokeKind::Inside);
                         ui.painter().text(pos2(chip.left() + 11.0, chip.center().y), Align2::CENTER_CENTER, icon::PAUSE, ui_kit::f_icon(base() - 1.0), pal.ink3);
                         ui.painter().galley(pos2(chip.left() + 22.0, chip.center().y - g.size().y / 2.0), g, pal.ink3);
-                        let hint = ui.interact(chip, egui::Id::new("order-held-hint"), Sense::hover());
+                        let hint = ui.interact(chip, egui::Id::unique("order-held-hint"), Sense::hover());
                         hint.on_hover_text("The pointer is over the list, so rows stay where they are while their values keep updating. Move the pointer away to re-sort.");
                     }
                 }
@@ -1245,7 +1245,7 @@ impl App {
             let div_x = name_r.right() + 4.0;
             self.name_divider_x = div_x;
             let hit = Rect::from_min_max(pos2(div_x - DIVIDER_HIT_HALF, hrect.top()), pos2(div_x + DIVIDER_HIT_HALF, hrect.bottom()));
-            let div = ui.interact(hit, egui::Id::new("proc-name-divider"), Sense::click_and_drag());
+            let div = ui.interact(hit, egui::Id::unique("proc-name-divider"), Sense::click_and_drag());
             let name_px = name_r.width() + 4.0;
             let home_does = if cols.is_right_dock() { "gives the data columns their fitted widths" } else { "restores the automatic width" };
             a11y::publish(&div, || {
@@ -1272,7 +1272,7 @@ impl App {
                     view.name_width = Some(name.clamp(bounds.0, bounds.1));
                 }
             };
-            let drag_id = egui::Id::new("proc-name-drag");
+            let drag_id = egui::Id::unique("proc-name-drag");
             if div.drag_started() {
                 ui.data_mut(|d| d.insert_temp(drag_id, name_now));
             }
@@ -1322,7 +1322,7 @@ impl App {
         let home = home_dir();
         // The list is one Tab stop; the rows are not. Up and Down (handled in `handle_keys`) move
         // the selection while it has the keyboard, and Shift+F10 opens the selected row's menu.
-        let list_stop = ui.interact(list, egui::Id::new(LIST_ID), Sense::focusable_noninteractive());
+        let list_stop = ui.interact(list, egui::Id::unique(LIST_ID), Sense::focusable_noninteractive());
         a11y::keep_keys(&list_stop, true, true, false);
         if list_stop.gained_focus() && self.selection.is_none() && !rows.is_empty() {
             self.move_selection(1);
@@ -1365,7 +1365,7 @@ impl App {
                     let w = list.width() - ui.spacing().scroll.allocated_width();
                     let (_, rect) = ui.allocate_space(vec2(w, rh));
                     // not a Tab stop (the list is), but a click target that is named
-                    let resp = ui.interact(rect, egui::Id::new(("proc-row", &row.id)), Sense::CLICK);
+                    let resp = ui.interact(rect, egui::Id::unique(("proc-row", &row.id)), Sense::CLICK);
                     let selected = self.selection.as_ref() == Some(&row.id);
                     let v = row_values(row, groups);
                     if ui.is_rect_visible(rect) {
@@ -1378,7 +1378,7 @@ impl App {
                     row_interaction(&resp, rect, row, groups, &v, cols, acts, selected && menu_for_selection);
                 }
             });
-            self.scroll_offset = out.state.offset.y;
+            self.scroll_offset = out.state.clamped_offset().y;
             self.viewport_h = out.inner_rect.height();
         });
         if let Some(x) = guide {
@@ -1640,7 +1640,7 @@ fn row_interaction(resp: &egui::Response, rect: Rect, row: &model::Row, groups: 
     }
     if !is_section {
         let has_path = v.exe.and_then(model::parent_dir).is_some();
-        ui_kit::row_menu(resp, rect, menu_key, egui::Id::new(LIST_ID), |ui| {
+        ui_kit::row_menu(resp, rect, menu_key, egui::Id::unique(LIST_ID), |ui| {
             if ui.button("End task").clicked() {
                 acts.push(Act::Kill(id.clone(), Signal::Term));
                 ui.close();

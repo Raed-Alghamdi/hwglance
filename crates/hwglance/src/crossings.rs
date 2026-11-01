@@ -191,7 +191,7 @@ pub fn chip(ui: &mut Ui, pal: &Palette, entries: &[Entry], tone: Option<Level>, 
     }
     ui.painter().circle_filled(pos2(rect.left() + 12.0, rect.center().y), 4.0, color);
     ui.painter().galley(pos2(rect.left() + 22.0, rect.center().y - g.size().y / 2.0), g, ink);
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, chip_text(entries)));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, chip_text(entries)));
     resp.on_hover_text(tip)
 }
 
@@ -224,7 +224,7 @@ pub fn list(ui: &mut Ui, pal: &Palette, entries: &[Entry], now_ms: u64, window_m
                 clicked = Some(e.c.id.clone());
                 ui.close();
             }
-            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, sentence(e, now_ms)));
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, sentence(e, now_ms)));
             resp.on_hover_text(sentence(e, now_ms));
         }
     });

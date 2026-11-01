@@ -417,7 +417,7 @@ pub fn reset_button(ui: &mut egui::Ui, pal: &Palette, c: &ResetButton) -> bool {
 /// in an invisible, disabled ui to measure it, so even the first frame puts the row where it
 /// belongs; a change settles on the next frame.
 pub fn right_cluster<R>(ui: &mut egui::Ui, mut add: impl FnMut(&mut egui::Ui) -> R) -> R {
-    let key = ui.id().with("right-cluster-width");
+    let key = ui.scope_id().with("right-cluster-width");
     let avail = ui.available_rect_before_wrap();
     let ltr = egui::Layout::left_to_right(egui::Align::Center);
     let known = ui.ctx().data(|d| d.get_temp::<f32>(key));

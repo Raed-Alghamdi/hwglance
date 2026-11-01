@@ -114,7 +114,7 @@ pub fn publish(resp: &Response, make: impl FnOnce() -> Spoken) {
 /// Name the edge and corner grabs of an egui window (they are drag-only handles egui leaves bare):
 /// "Resize the Settings window, right edge". `layer` is the window's layer.
 pub fn name_window_edges(ctx: &Context, layer: egui::LayerId, window: &str) {
-    let base = egui::Id::new(layer).with("edge_drag");
+    let base = egui::Id::unique(layer).with("edge_drag");
     for (suffix, side) in [
         ("right", "right edge"),
         ("left", "left edge"),
@@ -301,8 +301,8 @@ pub fn scroll_into_view(ui: &Ui, resp: &Response) {
     }
 }
 
-/// Shift+F10: open the context menu of the focused control. (The Menu key reaches egui as no
-/// event at all, because egui-winit has no mapping for it, so Shift+F10 is the one keyboard path.)
+/// Shift+F10: open the context menu of the focused control. (egui-winit 0.37 maps the Menu key to
+/// `Key::Menu`, but nothing here acts on it, so Shift+F10 is still the one keyboard path.)
 pub fn menu_key(ctx: &Context) -> bool {
     ctx.input(|i| i.key_pressed(Key::F10) && i.modifiers.shift_only())
 }

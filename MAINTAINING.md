@@ -7,7 +7,7 @@ A short runbook for the one person who maintains this project.
 - **CI** on every push and pull request: build, clippy, tests and the bar widget model test, plus `cargo deny` (advisories, licenses, duplicate versions, sources).
 - **Weekly audit** (`.github/workflows/audit.yml`, Mondays): checks the dependencies against new security advisories. A failed run emails the owner.
 - **Dependabot security alerts and fix PRs**, as soon as an advisory affects the lockfile.
-- **Dependabot version updates**, monthly, one PR for Cargo and one for GitHub Actions (major updates come as separate PRs).
+- **Dependabot version updates**, monthly: one PR for the egui crates, one for the other Cargo crates (major updates come as separate PRs) and one for GitHub Actions.
 - **Secret scanning with push protection** blocks pushes that contain tokens.
 - **Private vulnerability reporting**: reports arrive under the Security tab (see `SECURITY.md`).
 - **Immutable releases**: a published release cannot be edited.
@@ -19,12 +19,14 @@ A short runbook for the one person who maintains this project.
 2. When it is green, squash and merge.
 3. If the updated crate is compiled into the shipped binaries (check with `cargo tree -i <crate> -e normal,build`; dev-dependencies do not count), cut a patch release (section 4).
 
-### The vendored eframe
+### The egui crates
 
-`vendor/eframe` is eframe 0.36.2 with egui pull request #8631 applied (the window froze on Wayland when the compositor stopped its frame callbacks; `vendor/eframe/PATCHED.md` has the details). The root `Cargo.toml` points at it with `[patch.crates-io]` and keeps it out of `--workspace` tests, clippy and formatting with `exclude = ["vendor"]`; `cargo deny` still checks it (MIT OR Apache-2.0).
+`eframe`, `egui`, `egui_extras` and `egui_kittest` (and the crates they pull in: `epaint`, `emath`, `ecolor`, `egui-winit`) release together and must be on the same version, or two copies of egui end up in the build and nothing compiles. Dependabot groups them into one PR (`egui` in `.github/dependabot.yml`); do not merge a PR that bumps only some of them.
 
-- A Dependabot PR that bumps eframe within 0.36 changes only `Cargo.toml` version requirements and `Cargo.lock`, and the patch keeps using the vendored copy, so it does nothing (a 0.37 bump is the removal step below, and until then the patch no longer matches and cargo warns that it is unused). Close it, or update the vendored copy by hand: copy the new release from `~/.cargo/registry/src/*/eframe-X.Y.Z/` and apply the eframe files of the PR again.
-- When egui 0.37 is released (it contains the PR), remove the patch: set `eframe = "0.37"` and the other egui crates to 0.37 in `crates/hwglance/Cargo.toml`, delete the `[patch.crates-io]` section and `exclude` line from the root `Cargo.toml`, delete `vendor/`, run `cargo update`, then `scripts/check.sh` and `cargo deny check`. Check the new eframe's glow code still has `pre_present_notify` and the 250 ms redraw timeout before relying on it, and rerun the hidden-workspace test (start the window with `hyprctl dispatch exec "[workspace N silent] hwglance"` on a workspace no monitor shows and check that `hyprland-dialog` never appears).
+- Since 0.37 the Wayland frame-callback fix comes from upstream eframe ([egui pull request #8631](https://github.com/emilk/egui/pull/8631)): the window used to freeze on Hyprland with an NVIDIA GPU when the compositor stopped its frame callbacks (a workspace no monitor shows, or under a fullscreen window). Until 0.37 the project carried a patched copy of eframe 0.36.2 in `vendor/eframe`; it is gone.
+- After an egui upgrade, check that the new eframe still has `pre_present_notify` in `src/native/glow_integration.rs` and the 250 ms `MISSED_REDRAW_TIMEOUT` in `src/native/run.rs` (in `~/.cargo/registry/src/*/eframe-X.Y.Z/`).
+- Rerun the hidden-workspace test with a release build: start the window with `hyprctl dispatch exec "[workspace N silent] /path/to/hwglance"` on a workspace no monitor shows (with a Lua Hyprland config, as in Hyprland 0.56, that dispatch is a syntax error: use `hyprctl eval 'hl.exec_cmd("[workspace N silent] /path/to/hwglance")'`), wait about 30 seconds, and check that `hyprland-dialog` never appears in `hyprctl clients -j` and the process is still running.
+- The golden snapshots (`crates/hwglance/tests/snapshots/`) are GPU-rendered and can move a pixel or two with an egui upgrade (padding, corner radius). Review the diff, then refresh them with `UPDATE_SNAPSHOTS=1 cargo test -p hwglance --test snapshots` in a separate commit.
 
 ## 3. Monthly routine (about 30 minutes)
 

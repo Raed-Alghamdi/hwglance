@@ -300,7 +300,7 @@ impl App {
         }
         let width = fs(SETTINGS_W).min((ctx.content_rect().width() - 32.0).max(fs(560.0)));
         let mut window = egui::Window::new("Settings")
-            .id(egui::Id::new("settings-window"))
+            .id(egui::Id::unique("settings-window"))
             .title_bar(false)
             .default_size([width, fs(620.0)])
             .min_size([fs(560.0), fs(360.0)])
@@ -321,7 +321,7 @@ impl App {
                         .frame_when_inactive(false)
                         .min_size(vec2(side, side));
                     let r = ui.add(b).on_hover_text("Close (Esc)");
-                    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Close settings"));
+                    r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Close settings"));
                     if r.clicked() {
                         close = true;
                     }
@@ -521,7 +521,7 @@ impl App {
         match self.thr_pick.clone() {
             None => {
                 let search = egui::TextEdit::singleline(&mut self.thr_search)
-                    .id(egui::Id::new("thr-search"))
+                    .id(egui::Id::unique("thr-search"))
                     .hint_text("Add a threshold: search for a value, such as Tctl or fan")
                     .desired_width(fs(380.0))
                     .margin(vec2(8.0, 4.0))
@@ -906,7 +906,7 @@ impl App {
         ui.horizontal_wrapped(|ui| {
             let mut text = self.log_folder_edit.clone().unwrap_or_else(|| self.s.logging.folder.clone());
             let field = egui::TextEdit::singleline(&mut text)
-                .id(egui::Id::new("log-folder"))
+                .id(egui::Id::unique("log-folder"))
                 .font(egui::TextStyle::Monospace)
                 .hint_text(RichText::new(default).monospace())
                 .desired_width(fs(400.0))

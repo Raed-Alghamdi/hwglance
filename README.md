@@ -177,7 +177,7 @@ If the window or the collector panics, HW Glance appends a report (time, version
 
 The window also records the other ways it can end, under the journal tag `hwglance`: a startup or event-loop error and a SIGTERM, SIGINT, SIGHUP or SIGQUIT (with the sender's pid, uid and process name) are written to `crash.log` as well, and each start and each normal exit is one journal line (an exit says whether the window's own Close button or a close request from the compositor or window manager closed it). A window that disappears with none of these was ended by SIGKILL, which cannot be recorded, or crashed in a way that leaves a core dump (`coredumpctl`).
 
-On Wayland the window is drawn only while the compositor shows it. When its workspace is not on any monitor, or a fullscreen or maximized window covers it, the compositor stops asking for frames, and the window draws nothing and uses almost no CPU until it is shown again, when it paints at once. If Hyprland ever reports the window as "not responding", report it with the output of `hyprctl clients -j` and the version of the NVIDIA driver. This handling comes from a patched copy of eframe (see `vendor/eframe/PATCHED.md`).
+On Wayland the window is drawn only while the compositor shows it. When its workspace is not on any monitor, or a fullscreen or maximized window covers it, the compositor stops asking for frames, and the window draws nothing and uses almost no CPU until it is shown again, when it paints at once. If Hyprland ever reports the window as "not responding", report it with the output of `hyprctl clients -j` and the version of the NVIDIA driver. This handling comes from eframe 0.37 (egui pull request 8631).
 
 ## Known limitations
 

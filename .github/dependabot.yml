@@ -10,6 +10,10 @@ updates:
     commit-message:
       prefix: "deps"
     groups:
+      # The egui crates must move together (two versions in one build do not compile), so every
+      # update of them, major included, is one PR. Listed first so it wins over the group below.
+      egui:
+        patterns: ["egui*", "eframe", "epaint*", "emath", "ecolor"]
       # Minor and patch updates in one PR; a major update gets its own PR.
       cargo-minor-patch:
         update-types: ["minor", "patch"]

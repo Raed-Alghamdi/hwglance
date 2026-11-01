@@ -4,6 +4,10 @@ All notable changes to HW Glance are listed here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Changed
+
+- Updated the egui toolkit from 0.36 to 0.37. The Wayland out-of-view freeze fix (egui pull request 8631) is now part of eframe itself, so the patched copy of eframe that 0.3.0 carried is gone. The contents of the settings window sit about a pixel lower; nothing else looks different.
+
 ## [0.3.0] - 2026-10-27
 
 ### Added
