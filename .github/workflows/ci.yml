@@ -25,12 +25,14 @@ jobs:
         with:
           persist-credentials: false
 
+      # fonts-noto-core brings Noto Sans Arabic, the Arabic fallback fonts.rs looks for, so the
+      # Arabic render tests draw real glyphs (egui_kittest fails a test on a missing glyph).
       - name: Install system packages
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             pkg-config libxkbcommon-dev libwayland-dev libgl1-mesa-dev libegl1-mesa-dev \
-            libx11-dev libxcursor-dev libxrandr-dev libxi-dev
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev fontconfig fonts-noto-core
 
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable branch
         with:
