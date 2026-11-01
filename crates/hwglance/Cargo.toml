@@ -37,4 +37,4 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 unicode-bidi = "0.3"
 
 [dev-dependencies]
-egui_kittest = { version = "0.36", features = ["wgpu", "snapshot"] }
+egui_kittest = { version = "0.37", features = ["wgpu", "snapshot"] }
