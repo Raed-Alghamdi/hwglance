@@ -4,6 +4,8 @@ All notable changes to HW Glance are listed here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-01
+
 ### Changed
 
 - Updated the egui toolkit from 0.36 to 0.37. The Wayland out-of-view freeze fix (egui pull request 8631) is now part of eframe itself, so the patched copy of eframe that 0.3.0 carried is gone. The contents of the settings window sit about a pixel lower; nothing else looks different.
@@ -74,7 +76,8 @@ First release.
 - Sensors are read only, and nothing leaves your machine.
 - Packages: an Arch package and a generic x86_64 Linux tarball.
 
-[Unreleased]: https://github.com/Raed-Alghamdi/hwglance/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Raed-Alghamdi/hwglance/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/Raed-Alghamdi/hwglance/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Raed-Alghamdi/hwglance/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Raed-Alghamdi/hwglance/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/Raed-Alghamdi/hwglance/compare/v0.1.1...v0.1.2
