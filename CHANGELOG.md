@@ -4,6 +4,10 @@ All notable changes to HW Glance are listed here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Fixed
+
+- Updated async-executor from 1.14.0 to 1.14.1. 1.14.0 was withdrawn (yanked) by its authors because of a use-after-free when a task woke while the executor shut down; it reaches HW Glance through the accessibility support of the window toolkit. `cargo deny` also refuses a yanked crate, so CI would have failed on it.
+
 ## [0.3.1] - 2026-11-01
 
 ### Changed
